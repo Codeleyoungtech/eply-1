@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div class="page-title">✍️ Identity Profile</div>
+                        <div class="page-sub">The most important page — fill this in once, update as your life changes.
+                        </div>
+                    </div>
+                    <% if (saved) { %>
+                        <div class="alert alert-success">✅ Profile saved successfully</div>
+                        <% } %>
+                            <div
+                                style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#a5b4fc">
+                                💡 The <strong>Real Message Examples</strong> field has more impact than anything else.
+                                Paste 15–20 actual messages you've sent — copy from your WhatsApp chats.
+                            </div>
+                            <form method="POST" action="/identity">
+                                <div class="grid-2">
+                                    <div class="card">
+                                        <div class="card-title">Basic Info</div>
+                                        <div class="form-group"><label class="form-label">Full Name</label><input
+                                                class="form-input" name="full_name"
+                                                value="<%= identity.full_name || '' %>" placeholder="Your full name" />
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Nickname</label><input
+                                                class="form-input" name="nickname"
+                                                value="<%= identity.nickname || '' %>"
+                                                placeholder="What friends call you" /></div>
+                                        <div class="form-group"><label class="form-label">Location</label><input
+                                                class="form-input" name="location"
+                                                value="<%= identity.location || '' %>" placeholder="City, Country" />
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Timezone</label><input
+                                                class="form-input" name="timezone"
+                                                value="<%= identity.timezone || 'Africa/Johannesburg' %>"
+                                                placeholder="Africa/Johannesburg" /></div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-title">What You Do</div>
+                                        <div class="form-group"><label class="form-label">Job /
+                                                Business</label><textarea class="form-textarea" name="what_i_do"
+                                                rows="3"
+                                                placeholder="Job, business, side projects, role, industry"><%= identity.what_i_do || '' %></textarea>
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Current
+                                                Projects</label><textarea class="form-textarea" name="projects" rows="3"
+                                                placeholder="What you're actually working on right now"><%= identity.projects || '' %></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="grid-2" style="margin-top:16px">
+                                    <div class="card">
+                                        <div class="card-title">Your Vibe</div>
+                                        <div class="form-group"><label class="form-label">Vibe /
+                                                Personality</label><textarea class="form-textarea" name="vibe" rows="3"
+                                                placeholder="Casual and real — type like a human..."><%= identity.vibe || '' %></textarea>
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Slang / Phrases you
+                                                use</label><input class="form-input" name="slang"
+                                                value="<%= identity.slang || '' %>"
+                                                placeholder="e.g. bro, lol, tbh, wagwan, sharp" /></div>
+                                        <div class="form-group"><label class="form-label">Never Say</label><input
+                                                class="form-input" name="never_say"
+                                                value="<%= identity.never_say || '' %>"
+                                                placeholder="certainly, absolutely, as an AI" /></div>
+                                        <div class="form-group"><label class="form-label">Emoji use</label><input
+                                                class="form-input" name="emoji_use"
+                                                value="<%= identity.emoji_use || 'occasional' %>"
+                                                placeholder="occasional / rare / lots" /></div>
+                                        <div class="form-group"><label class="form-label">Reply Length</label><input
+                                                class="form-input" name="reply_length"
+                                                value="<%= identity.reply_length || 'short' %>"
+                                                placeholder="short / medium / varies" /></div>
+                                    </div>
+                                    <div class="card">
+                                        <div class="card-title">Context</div>
+                                        <div class="form-group"><label class="form-label">Daily
+                                                Schedule</label><textarea class="form-textarea" name="schedule" rows="2"
+                                                placeholder="When you work, sleep, gym, usually unavailable"><%= identity.schedule || '' %></textarea>
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Interests</label><textarea
+                                                class="form-textarea" name="interests" rows="2"
+                                                placeholder="What you talk about, what you're into"><%= identity.interests || '' %></textarea>
+                                        </div>
+                                        <div class="form-group"><label class="form-label">Off-limits
+                                                Topics</label><textarea class="form-textarea" name="off_limits" rows="2"
+                                                placeholder="money transfers, legal advice, medical advice"><%= identity.off_limits || '' %></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card" style="margin-top:16px">
+                                    <div class="card-title">⭐ Real Message Examples — Most Important Field</div>
+                                    <p style="color:var(--muted);font-size:13px;margin-bottom:12px">Paste 15–20 actual
+                                        messages you've sent. Not crafted — real copy-pastes from your chats.</p>
+                                    <div class="form-group"><textarea class="form-textarea" name="real_examples"
+                                            rows="10"
+                                            placeholder="'yeah bro that makes sense tbh'&#10;'lol no stress I'll sort it out'&#10;'sounds good lmk'&#10;'been mad busy lately will explain when I see you'&#10;..."><%= identity.real_examples || '' %></textarea>
+                                    </div>
+                                </div>
+                                <div style="margin-top:20px;display:flex;gap:12px">
+                                    <button type="submit" class="btn btn-primary">Save Identity Profile</button>
+                                    <a href="/" class="btn btn-ghost">Cancel</a>
+                                </div>
+                            </form>
+                </div>
+            </main>
+    </div>
+</body>
+
+</html>

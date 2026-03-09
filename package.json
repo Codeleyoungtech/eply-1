@@ -1,0 +1,48 @@
+{
+    "name": "eply",
+    "version": "1.0.0",
+    "description": "Your AI Self on WhatsApp — responds as you, sounds like you, never sleeps.",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "node --watch index.js"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.39.0",
+        "@google/generative-ai": "^0.24.0",
+        "@hapi/boom": "^10.0.1",
+        "baileys": "latest",
+        "better-sqlite3": "^11.9.1",
+        "bullmq": "^5.41.2",
+        "connect-sqlite3": "^0.9.13",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.7",
+        "ejs": "^3.1.10",
+        "express": "^4.21.2",
+        "express-session": "^1.18.1",
+        "groq-sdk": "^0.12.0",
+        "ioredis": "^5.4.2",
+        "link-preview-js": "^3.0.7",
+        "mime-types": "^2.1.35",
+        "multer": "^2.0.0",
+        "node-cron": "^3.0.3",
+        "pino": "^9.6.0",
+        "qrcode": "^1.5.4",
+        "winston": "^3.17.0",
+        "winston-transport": "^4.9.0"
+    },
+    "devDependencies": {
+        "nodemon": "^3.1.9"
+    },
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "better-sqlite3",
+            "msgpackr-extract",
+            "protobufjs",
+            "sqlite3"
+        ]
+    }
+}

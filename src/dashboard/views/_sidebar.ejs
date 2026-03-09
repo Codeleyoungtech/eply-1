@@ -1,0 +1,48 @@
+<% const statusClass2=waStatus==='connected' ? 'connected' : waStatus==='connecting' ? 'connecting' : 'disconnected' ;
+    %>
+    <nav class="sidebar">
+        <div class="sidebar-logo">
+            <div class="wordmark"><span>E</span>PLY</div>
+            <div class="tagline">Your AI Self</div>
+        </div>
+        <div class="nav-section">
+            <div class="nav-label">Overview</div>
+            <a href="/" class="nav-link <%= currentPath === '/' ? 'active' : '' %>"><span class="icon">⚡</span>
+                <span>Dashboard</span></a>
+            <a href="/qr" class="nav-link <%= currentPath === '/qr' ? 'active' : '' %>"><span class="icon">📱</span>
+                <span>Connect WA</span></a>
+        </div>
+        <div class="nav-section">
+            <div class="nav-label">Identity</div>
+            <a href="/identity" class="nav-link <%= currentPath === '/identity' ? 'active' : '' %>"><span
+                    class="icon">✍️</span> <span>Identity</span></a>
+            <a href="/vip" class="nav-link <%= currentPath === '/vip' ? 'active' : '' %>"><span class="icon">👑</span>
+                <span>VIP List</span></a>
+        </div>
+        <div class="nav-section">
+            <div class="nav-label">Activity</div>
+            <a href="/flagged" class="nav-link <%= currentPath === '/flagged' ? 'active' : '' %>"><span
+                    class="icon">⚠️</span> <span>Flagged</span></a>
+            <a href="/digest" class="nav-link <%= currentPath === '/digest' ? 'active' : '' %>"><span
+                    class="icon">☀️</span> <span>Digest</span></a>
+            <a href="/chats" class="nav-link <%= currentPath.startsWith('/chats') ? 'active' : '' %>"><span
+                    class="icon">💬</span> <span>Chats</span></a>
+            <a href="/memory" class="nav-link <%= currentPath === '/memory' ? 'active' : '' %>"><span
+                    class="icon">🧠</span> <span>Memory</span></a>
+        </div>
+        <div class="nav-section">
+            <div class="nav-label">System</div>
+            <a href="/scheduler" class="nav-link <%= currentPath === '/scheduler' ? 'active' : '' %>"><span
+                    class="icon">🕐</span> <span>Scheduler</span></a>
+            <a href="/settings" class="nav-link <%= currentPath === '/settings' ? 'active' : '' %>"><span
+                    class="icon">⚙️</span> <span>Settings</span></a>
+            <a href="/logs" class="nav-link <%= currentPath === '/logs' ? 'active' : '' %>"><span class="icon">📡</span>
+                <span>Live Logs</span></a>
+        </div>
+        <div class="sidebar-footer">
+            <span class="status-badge <%= statusClass2 %>">
+                <%= waStatus==='connected' ? 'Connected' : waStatus==='connecting' ? 'Connecting' : 'Disconnected' %>
+            </span>
+            <a href="/logout" class="btn btn-ghost btn-sm">Sign out</a>
+        </div>
+    </nav>

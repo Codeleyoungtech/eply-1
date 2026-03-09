@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div
+                            style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                            <div>
+                                <div class="page-title">☀️ Digest History</div>
+                                <div class="page-sub">Every daily digest EPLY has built</div>
+                            </div>
+                            <form method="POST" action="/digest/trigger">
+                                <button class="btn btn-primary btn-sm">Trigger Now</button>
+                            </form>
+                        </div>
+                    </div>
+                    <% if (req && req.query && req.query.triggered) { %>
+                        <div class="alert alert-success">✅ Digest sent!</div>
+                        <% } %>
+                            <% if (!digests.length) { %>
+                                <div class="card" style="text-align:center;padding:48px">
+                                    <div style="font-size:48px;margin-bottom:12px">☀️</div>
+                                    <div style="font-size:17px;font-weight:700">No digests yet</div>
+                                    <p style="color:var(--muted);margin-top:6px">Your first digest will arrive at your
+                                        configured time. Click "Trigger Now" to test immediately.</p>
+                                </div>
+                                <% } else { %>
+                                    <div style="display:flex;flex-direction:column;gap:12px">
+                                        <% digests.forEach(d=> { %>
+                                            <div class="card">
+                                                <div
+                                                    style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                                                    <div style="font-size:13px;color:var(--muted)">
+                                                        <%= new Date(d.created_at*1000).toLocaleString('en-GB') %>
+                                                    </div>
+                                                    <span class="badge"
+                                                        style="background:rgba(34,197,94,0.1);color:<%= d.delivered ? '#22c55e' : '#eab308' %>">
+                                                        <%= d.delivered ? 'delivered' : 'pending' %>
+                                                    </span>
+                                                </div>
+                                                <pre
+                                                    style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;color:var(--text);line-height:1.7"><%= d.content %></pre>
+                                            </div>
+                                            <% }) %>
+                                    </div>
+                                    <% } %>
+                </div>
+            </main>
+    </div>
+</body>
+
+</html>

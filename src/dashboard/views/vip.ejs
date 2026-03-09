@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div class="page-title">👑 VIP List</div>
+                        <div class="page-sub">These contacts always get the real you. EPLY will never auto-reply to
+                            them.</div>
+                    </div>
+                    <% if (saved) { %>
+                        <div class="alert alert-success">✅ VIP list updated (<%=saved%>)</div>
+                        <% } %>
+                            <div
+                                style="background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.3);border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:13px;color:#fcd34d">
+                                🔒 <strong>Sacred rule:</strong> EPLY NEVER auto-replies to VIP contacts — no
+                                exceptions, no overrides. VIP messages appear in your daily digest and trigger urgent
+                                pings.
+                            </div>
+                            <div class="grid-2" style="margin-bottom:24px">
+                                <div class="card">
+                                    <div class="card-title">Add VIP Contact</div>
+                                    <form method="POST" action="/vip/add"
+                                        style="display:flex;flex-direction:column;gap:12px">
+                                        <div class="form-group" style="margin-bottom:0"><label class="form-label">Phone
+                                                Number</label><input class="form-input" name="phone"
+                                                placeholder="27821234567 (digits only, no +)" required /></div>
+                                        <div class="form-group" style="margin-bottom:0"><label
+                                                class="form-label">Label</label><input class="form-input" name="label"
+                                                placeholder="Mama, Partner, Best friend…" /></div>
+                                        <button type="submit" class="btn btn-primary">Add to VIP List</button>
+                                    </form>
+                                </div>
+                                <div class="card">
+                                    <div class="card-title">Current VIP List (<%= vips.length %> contacts)</div>
+                                    <% if (!vips.length) { %>
+                                        <p style="color:var(--muted);font-size:13px">No VIP contacts added yet. Typical
+                                            list: parents, siblings, partner, 3–5 closest friends.</p>
+                                        <% } else { %>
+                                            <table class="table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Label</th>
+                                                        <th>Phone</th>
+                                                        <th></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <% vips.forEach(v=> { %>
+                                                        <tr>
+                                                            <td><strong>
+                                                                    <%= v.label || '—' %>
+                                                                </strong></td>
+                                                            <td style="font-family:monospace;color:var(--muted)">+<%=
+                                                                    v.phone %>
+                                                            </td>
+                                                            <td>
+                                                                <form method="POST" action="/vip/remove/<%= v.id %>"
+                                                                    style="display:inline">
+                                                                    <button type="submit"
+                                                                        class="btn btn-danger btn-sm">Remove</button>
+                                                                </form>
+                                                            </td>
+                                                        </tr>
+                                                        <% }) %>
+                                                </tbody>
+                                            </table>
+                                            <% } %>
+                                </div>
+                            </div>
+                            <% if (recentVipMsgs.length) { %>
+                                <div class="card">
+                                    <div class="card-title">Recent VIP Messages (not auto-replied)</div>
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th>Contact</th>
+                                                <th>Message</th>
+                                                <th>Time</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <% recentVipMsgs.forEach(m=> { %>
+                                                <tr>
+                                                    <td>
+                                                        <%= m.contact_name || m.jid.split('@')[0] %>
+                                                    </td>
+                                                    <td
+                                                        style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                                        <%= m.content %>
+                                                    </td>
+                                                    <td style="color:var(--muted);white-space:nowrap">
+                                                        <%= new
+                                                            Date(m.timestamp*1000).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
+                                                            %>
+                                                    </td>
+                                                </tr>
+                                                <% }) %>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <% } %>
+                </div>
+            </main>
+    </div>
+</body>
+
+</html>

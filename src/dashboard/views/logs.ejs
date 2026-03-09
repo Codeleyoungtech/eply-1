@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div class="page-title">📡 Live Logs</div>
+                        <div class="page-sub">Real-time log stream from EPLY's engine</div>
+                    </div>
+                    <div class="card">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                            <div class="card-title" style="margin-bottom:0">Log Stream</div>
+                            <button class="btn btn-ghost btn-sm"
+                                onclick="document.getElementById('log-el').innerHTML=''">Clear</button>
+                        </div>
+                        <div id="log-el" class="log-stream"></div>
+                    </div>
+                </div>
+            </main>
+    </div>
+    <script>
+        const el = document.getElementById('log-el');
+        const es = new EventSource('/logs/stream');
+        const levelCls = { info: 'log-info', warn: 'log-warn', error: 'log-error', debug: 'log-debug' };
+        es.onmessage = (e) => {
+            try {
+                const d = JSON.parse(e.data);
+                const cls = levelCls[d.level] || 'log-debug';
+                const line = document.createElement('div');
+                line.className = cls;
+                line.textContent = `[${d.timestamp || new Date().toTimeString().slice(0, 8)}] ${d.level?.toUpperCase().padEnd(5)} ${d.message}`;
+                el.appendChild(line);
+                el.scrollTop = el.scrollHeight;
+            } catch { }
+        };
+        es.onerror = () => {
+            const line = document.createElement('div');
+            line.className = 'log-error';
+            line.textContent = '[stream disconnected — reload to reconnect]';
+            el.appendChild(line);
+        };
+    </script>
+</body>
+
+</html>

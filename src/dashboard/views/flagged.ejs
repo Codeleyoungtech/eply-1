@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div
+                            style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+                            <div>
+                                <div class="page-title">⚠️ Flagged Messages</div>
+                                <div class="page-sub">Messages EPLY flagged for your review — action needed</div>
+                            </div>
+                            <a href="/flagged<%= showAll ? '' : '?all=1' %>" class="btn btn-ghost btn-sm">
+                                <%= showAll ? 'Show unhandled only' : 'Show all (incl. handled)' %>
+                            </a>
+                        </div>
+                    </div>
+                    <% if (!items.length) { %>
+                        <div class="card" style="text-align:center;padding:48px">
+                            <div style="font-size:48px;margin-bottom:12px">✅</div>
+                            <div style="font-size:17px;font-weight:700">No flagged items</div>
+                            <p style="color:var(--muted);margin-top:6px">EPLY hasn't flagged anything that needs your
+                                attention.</p>
+                        </div>
+                        <% } else { %>
+                            <div style="display:flex;flex-direction:column;gap:12px">
+                                <% items.forEach(item=> { %>
+                                    <div class="card"
+                                        style="border-left: 3px solid <%= item.handled ? 'var(--border)' : 'var(--yellow)' %>">
+                                        <div
+                                            style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                                            <div style="flex:1">
+                                                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                                                    <strong>
+                                                        <%= item.contact_name || item.jid.split('@')[0] %>
+                                                    </strong>
+                                                    <span class="badge"
+                                                        style="background:rgba(234,179,8,0.15);color:#eab308">
+                                                        <%= item.reason %>
+                                                    </span>
+                                                    <% if (item.handled) { %><span class="badge"
+                                                            style="background:rgba(34,197,94,0.1);color:#22c55e">handled</span>
+                                                        <% } %>
+                                                </div>
+                                                <div style="color:var(--muted);font-size:12px;margin-bottom:6px">
+                                                    <%= new Date(item.created_at*1000).toLocaleString('en-GB') %>
+                                                </div>
+                                                <div style="margin-bottom:6px"><span
+                                                        style="color:var(--muted);font-size:12px">Their
+                                                        message:</span><br /><span style="font-size:13.5px">
+                                                        <%= item.their_msg %>
+                                                    </span></div>
+                                                <% if (item.eply_reply) { %>
+                                                    <div><span style="color:var(--muted);font-size:12px">EPLY
+                                                            replied:</span><br /><span
+                                                            style="color:#a5b4fc;font-size:13.5px">"<%= item.eply_reply
+                                                                %>"</span></div>
+                                                    <% } %>
+                                            </div>
+                                            <% if (!item.handled) { %>
+                                                <form method="POST" action="/flagged/<%= item.id %>/handled">
+                                                    <button class="btn btn-ghost btn-sm">Mark handled</button>
+                                                </form>
+                                                <% } %>
+                                        </div>
+                                    </div>
+                                    <% }) %>
+                            </div>
+                            <% } %>
+                </div>
+            </main>
+    </div>
+</body>
+
+</html>

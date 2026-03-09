@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="login-wrap">
+        <div class="card login-card">
+            <div class="login-logo"><span>E</span>PLY</div>
+            <div class="login-tagline">Your AI Self on WhatsApp</div>
+            <% if (error) { %>
+                <div class="alert alert-danger">⚠️ <%= error %>
+                </div>
+                <% } %>
+                    <form method="POST" action="/login">
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" name="password" class="form-input" placeholder="Dashboard password"
+                                autofocus required />
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">Sign In
+                            →</button>
+                    </form>
+        </div>
+    </div>
+</body>
+
+</html>

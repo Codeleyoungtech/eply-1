@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div class="page-title">🧠 Memory</div>
+                        <div class="page-sub">Facts EPLY has learned about you and your contacts</div>
+                    </div>
+                    <% if (!memories.length) { %>
+                        <div class="card" style="text-align:center;padding:48px">
+                            <div style="font-size:48px;margin-bottom:12px">🧠</div>
+                            <div style="font-size:17px;font-weight:700">No memories yet</div>
+                            <p style="color:var(--muted);margin-top:6px">EPLY will automatically extract and store facts
+                                as it handles conversations.</p>
+                        </div>
+                        <% } else { %>
+                            <div class="card">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Contact</th>
+                                            <th>Fact</th>
+                                            <th>Learned</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <% memories.forEach(m=> { %>
+                                            <tr>
+                                                <td><strong>
+                                                        <%= m.contact_name || m.jid.split('@')[0] %>
+                                                    </strong></td>
+                                                <td>
+                                                    <form method="POST" action="/memory/<%= m.id %>/edit"
+                                                        style="display:flex;gap:6px">
+                                                        <input class="form-input" name="fact" value="<%= m.fact %>"
+                                                            style="flex:1;min-width:200px" />
+                                                        <button class="btn btn-ghost btn-sm">Save</button>
+                                                    </form>
+                                                </td>
+                                                <td style="color:var(--muted);white-space:nowrap">
+                                                    <%= new
+                                                        Date(m.created_at*1000).toLocaleString('en-GB',{day:'numeric',month:'short'})
+                                                        %>
+                                                </td>
+                                                <td>
+                                                    <form method="POST" action="/memory/<%= m.id %>/delete">
+                                                        <button class="btn btn-danger btn-sm">Delete</button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                            <% }) %>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <% } %>
+                </div>
+            </main>
+    </div>
+</body>
+
+</html>

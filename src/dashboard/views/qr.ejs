@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+    <div class="shell">
+        <%- include('_sidebar') %>
+            <main class="main">
+                <div class="page">
+                    <div class="page-header">
+                        <div class="page-title">📱 Connect WhatsApp</div>
+                        <div class="page-sub">Scan the QR code to link your WhatsApp account</div>
+                    </div>
+                    <div class="card">
+                        <% if (waStatus==='connected' ) { %>
+                            <div class="qr-wrap">
+                                <div style="font-size:64px">✅</div>
+                                <div class="page-title">WhatsApp Connected</div>
+                                <p class="page-sub">EPLY is live and listening for messages. Your session is saved — it
+                                    will survive all restarts.</p>
+                                <a href="/" class="btn btn-primary">Go to Dashboard</a>
+                            </div>
+                            <% } else { %>
+                                <div class="qr-wrap">
+                                    <div id="qr-status" style="color:var(--muted);font-size:13px">Loading QR code...
+                                    </div>
+                                    <img id="qr-img" class="qr-img" src="" alt="QR Code" style="display:none" />
+                                    <div class="qr-instructions">
+                                        <strong style="color:var(--text)">How to connect:</strong><br />
+                                        1. Open WhatsApp on your phone<br />
+                                        2. Settings → Linked Devices → Add Device<br />
+                                        3. Scan the QR code above<br /><br />
+                                        <span style="color:var(--accent)">QR refreshes automatically every 20
+                                            seconds</span>
+                                    </div>
+                                </div>
+                                <% } %>
+                    </div>
+                </div>
+            </main>
+    </div>
+    <script>
+        async function fetchQr() {
+            try {
+                const res = await fetch('/qr/data');
+                const data = await res.json();
+                if (data.status === 'connected') {
+                    location.reload();
+                    return;
+                }
+                if (data.qr) {
+                    document.getElementById('qr-img').src = data.qr;
+                    document.getElementById('qr-img').style.display = 'block';
+                    document.getElementById('qr-status').textContent = 'Scan with WhatsApp to connect';
+                } else {
+                    document.getElementById('qr-status').textContent = 'Waiting for QR code...';
+                }
+            } catch (e) { }
+        }
+        fetchQr();
+        setInterval(fetchQr, 20000);
+    </script>
+</body>
+
+</html>

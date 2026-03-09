@@ -1,0 +1,139 @@
+<% const statusClass=waStatus==='connected' ? 'connected' : waStatus==='connecting' ? 'connecting' : 'disconnected' ;
+    const autoChecked=autoReply ? 'checked' : '' ; %>
+    <!DOCTYPE html>
+    <html lang="en">
+
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>
+            <%= title %>
+        </title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+            rel="stylesheet" />
+        <link rel="stylesheet" href="/style.css" />
+    </head>
+
+    <body>
+        <div class="shell">
+            <%- include('_sidebar') %>
+                <main class="main">
+                    <div class="page">
+                        <div class="page-header">
+                            <div class="page-title">Dashboard</div>
+                            <div class="page-sub">Live overview of EPLY's activity</div>
+                        </div>
+
+                        <!-- Status + Toggle -->
+                        <div class="card" style="margin-bottom:20px">
+                            <div
+                                style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+                                <div>
+                                    <div class="card-title">WhatsApp Status</div>
+                                    <span class="status-badge <%= statusClass %>"
+                                        style="font-size:14px;padding:6px 14px">
+                                        <%= waStatus==='connected' ? '● Connected' : waStatus==='connecting'
+                                            ? '● Connecting…' : '● Disconnected' %>
+                                    </span>
+                                    <% if (waStatus !=='connected' ) { %>
+                                        <a href="/qr" class="btn btn-primary btn-sm" style="margin-left:12px">Connect
+                                            WhatsApp →</a>
+                                        <% } %>
+                                </div>
+                                <div>
+                                    <div class="card-title">Auto-Reply</div>
+                                    <div class="toggle-wrap">
+                                        <span class="toggle-label" id="toggle-status">
+                                            <%= autoReply ? '🟢 Enabled' : '🔴 Disabled' %>
+                                        </span>
+                                        <label class="toggle">
+                                            <input type="checkbox" id="auto-toggle" <%=autoChecked %> />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Stats -->
+                        <div class="grid-3" style="margin-bottom:20px">
+                            <div class="card">
+                                <div class="card-title">Messages handled (24h)</div>
+                                <div class="stat-val">
+                                    <%= stats.total || 0 %>
+                                </div>
+                                <div class="stat-label">total incoming</div>
+                            </div>
+                            <div class="card">
+                                <div class="card-title">Replies sent (24h)</div>
+                                <div class="stat-val">
+                                    <%= stats.replies_sent || 0 %>
+                                </div>
+                                <div class="stat-label">auto replies</div>
+                            </div>
+                            <div class="card">
+                                <div class="card-title">Flagged (pending)</div>
+                                <div class="stat-val" style="color:#eab308">
+                                    <%= flaggedCount %>
+                                </div>
+                                <div class="stat-label"><a href="/flagged">view queue →</a></div>
+                            </div>
+                        </div>
+
+                        <!-- LLM breakdown -->
+                        <div class="card" style="margin-bottom:20px">
+                            <div class="card-title">LLM Usage (24h)</div>
+                            <div class="grid-3">
+                                <div>
+                                    <div class="stat-label">Groq</div>
+                                    <div class="stat-val stat-groq">
+                                        <%= stats.groq_count || 0 %>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="stat-label">Gemini</div>
+                                    <div class="stat-val stat-gemini">
+                                        <%= stats.gemini_count || 0 %>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="stat-label">Claude</div>
+                                    <div class="stat-val stat-claude">
+                                        <%= stats.claude_count || 0 %>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick links -->
+                        <div class="grid-2">
+                            <a href="/identity" class="card"
+                                style="display:block;border:2px dashed var(--border);cursor:pointer;transition:border-color 0.2s"
+                                onmouseover="this.style.borderColor='var(--accent)'"
+                                onmouseout="this.style.borderColor='var(--border)'">
+                                <div class="card-title">✍️ Identity Profile</div>
+                                <div style="color:var(--muted);font-size:13px">Fill your persona — the most important
+                                    step.</div>
+                            </a>
+                            <a href="/flagged" class="card"
+                                style="display:block;border:2px solid rgba(234,179,8,0.3);cursor:pointer">
+                                <div class="card-title">⚠️ Flagged Messages</div>
+                                <div style="color:var(--muted);font-size:13px">
+                                    <%= flaggedCount %> item(s) need your attention.
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </main>
+        </div>
+        <script>
+            document.getElementById('auto-toggle').addEventListener('change', async (e) => {
+                const res = await fetch('/toggle-auto-reply', { method: 'PATCH' });
+                const data = await res.json();
+                document.getElementById('toggle-status').textContent = data.enabled ? '🟢 Enabled' : '🔴 Disabled';
+            });
+        </script>
+    </body>
+
+    </html>
