@@ -8,6 +8,7 @@
 const {
     jidNormalizedUser,
     getContentType,
+    normalizeMessageContent,
 } = require('baileys');
 const { applyReplyRules } = require('../engine/replyRules');
 const { routeAndReply } = require('../engine/llmRouter');
@@ -16,14 +17,20 @@ const { extractAndStore, getContactMemories } = require('../engine/memoryManager
 const { detectUrgency, resetFollowUp } = require('../engine/urgencyDetector');
 const { sendUrgentPing } = require('../engine/notifier');
 const { isVip, saveMessage, flagMessage, getSetting } = require('../db/queries');
-const { sendMessage, getClient } = require('./connection');
+const { sendMessage, getClient, getStatus } = require('./connection');
 const { logger } = require('../logger');
+
+function getInnerMessage(msg) {
+    return normalizeMessageContent(msg?.message) || msg?.message || null;
+}
 
 /** Extract text content from a Baileys message object */
 function extractText(msg) {
-    const type = getContentType(msg.message);
+    const inner = getInnerMessage(msg);
+    if (!inner) return null;
+    const type = getContentType(inner);
     if (!type) return null;
-    const m = msg.message[type];
+    const m = inner[type];
     if (typeof m === 'string') return m;
     if (m?.text) return m.text;
     if (m?.caption) return m.caption;
@@ -33,7 +40,9 @@ function extractText(msg) {
 
 /** Extract media type from a Baileys message */
 function extractMediaType(msg) {
-    const type = getContentType(msg.message);
+    const inner = getInnerMessage(msg);
+    if (!inner) return null;
+    const type = getContentType(inner);
     if (!type) return null;
     if (type === 'imageMessage') return 'image';
     if (type === 'audioMessage') return 'audio';
@@ -54,7 +63,8 @@ function extractName(msg) {
 /** Check if the message @mentions our number or name */
 function checkMentions(msg, adminNumber, adminName) {
     const body = extractText(msg) || '';
-    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const inner = getInnerMessage(msg);
+    const mentioned = inner?.extendedTextMessage?.contextInfo?.mentionedJid || [];
     const adminJid = `${adminNumber}@s.whatsapp.net`;
 
     // Direct @mention of admin number
@@ -69,10 +79,31 @@ function checkMentions(msg, adminNumber, adminName) {
 
 /** Check if this is a reply to one of our previously sent messages */
 function checkReplyToMe(msg) {
-    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
-    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    const inner = getInnerMessage(msg);
+    const quotedId = inner?.extendedTextMessage?.contextInfo?.stanzaId;
+    const quotedParticipant = inner?.extendedTextMessage?.contextInfo?.participant;
     // If there's a quoted message and it's attributed to us (fromMe pattern)
     return !!quotedId && !quotedParticipant; // rough heuristic — fromMe quoted msgs have no participant
+}
+
+function runOwnerCommand(commandText, { waStatus, autoReplyEnabled }) {
+    const cmd = commandText.trim().toLowerCase();
+    if (cmd === '!help') {
+        return [
+            'EPLY owner commands:',
+            '!help - list commands',
+            '!status - WhatsApp + auto-reply status',
+            '!where - where to view messages',
+            'Dashboard messages: /chats and /chats/<contact>',
+        ].join('\n');
+    }
+    if (cmd === '!status') {
+        return `Status: ${waStatus}\nAuto-reply: ${autoReplyEnabled ? 'enabled' : 'disabled'}`;
+    }
+    if (cmd === '!where') {
+        return 'Open dashboard -> /chats to see all conversations, then click "View Thread" for full messages.';
+    }
+    return null;
 }
 
 async function handleMessage(msg) {
@@ -99,6 +130,16 @@ async function handleMessage(msg) {
         const text = extractText(msg);
         const mediaType = extractMediaType(msg);
         const contactName = extractName(msg);
+        const parsedType = getContentType(getInnerMessage(msg) || {});
+
+        logger.debug('Parsed incoming message', {
+            id: msg.key?.id,
+            jid,
+            parsedType: parsedType || 'unknown',
+            hasText: !!text,
+            hasMedia: !!mediaType,
+            fromMe: !!msg.key?.fromMe,
+        });
 
         // ── Save message to context (even if we sent it manually) ─────────────
         const direction = msg.key.fromMe && !isSelfChat ? 'out' : 'in';
@@ -130,6 +171,19 @@ async function handleMessage(msg) {
             && process.env.AUTO_REPLY_ENABLED !== 'false';
 
         logger.info('Message received', { jid, isSelfChat, isGroup, preview: (text || '').slice(0, 60) });
+
+        const normalizedAdmin = (process.env.ADMIN_NUMBER || '').replace(/[^0-9]/g, '');
+        const isAdminDm = !isGroup && normalizedAdmin && phone === normalizedAdmin;
+        const isOwnerCommand = !isGroup && text && text.trim().startsWith('!') && (isSelfChat || isAdminDm);
+        if (isOwnerCommand) {
+            const commandReply = runOwnerCommand(text, { waStatus: getStatus(), autoReplyEnabled });
+            if (commandReply) {
+                await sendMessage(jid, commandReply);
+                saveMessage({ jid, contactName, direction: 'out', content: commandReply, llmUsed: 'manual', isGroup });
+                logger.info('Owner command handled', { jid, command: text.trim().toLowerCase() });
+                return;
+            }
+        }
 
         // ── Extract memory facts from DMs ─────────────────────────────────────
         if (!isGroup && text) {

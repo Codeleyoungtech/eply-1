@@ -32,6 +32,7 @@ waEmitter.setMaxListeners(20);
 let sock = null;
 let currentQrDataUrl = null;
 let connectionStatus = 'disconnected'; // disconnected | connecting | connected
+const recentlyForwarded = new Map(); // key -> unix seconds
 
 function getClient() { return sock; }
 function getQrDataUrl() { return currentQrDataUrl; }
@@ -96,14 +97,31 @@ async function connectToWhatsApp() {
 
     // ── Message listener ─────────────────────────────────────────────────────
     const sessionStartTime = Date.now() / 1000 - 30; // ignore anything older than 30s
+    const acceptedUpsertTypes = new Set(['notify', 'append']);
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
+        if (!acceptedUpsertTypes.has(type)) return;
         logger.debug('messages.upsert fired', { type, count: messages.length });
-
-        if (type !== 'notify') return; // 'append' = historical batch, skip it
 
         for (const msg of messages) {
             const ts = Number(msg.messageTimestamp || 0);
+            const id = msg.key?.id || '';
+            const remote = msg.key?.remoteJid || '';
+            const dedupeKey = `${remote}:${id}`;
+
+            // Drop duplicates (same message can arrive through multiple upsert batches)
+            const now = Math.floor(Date.now() / 1000);
+            if (id && recentlyForwarded.has(dedupeKey)) {
+                continue;
+            }
+            if (id) {
+                recentlyForwarded.set(dedupeKey, now);
+            }
+
+            // Keep dedupe map small (10-minute TTL)
+            for (const [k, seenAt] of recentlyForwarded.entries()) {
+                if (now - seenAt > 600) recentlyForwarded.delete(k);
+            }
 
             // Drop historical messages synced at boot
             if (ts > 0 && ts < sessionStartTime) {
@@ -112,9 +130,10 @@ async function connectToWhatsApp() {
             }
 
             logger.debug('Forwarding message to handler', {
-                id: msg.key?.id,
-                from: msg.key?.remoteJid,
+                id,
+                from: remote,
                 fromMe: msg.key?.fromMe,
+                type,
             });
 
             waEmitter.emit('message', msg);

@@ -49,27 +49,29 @@
                 </div>
             </main>
     </div>
-    <script>
-        async function fetchQr() {
-            try {
-                const res = await fetch('/qr/data');
-                const data = await res.json();
-                if (data.status === 'connected') {
-                    location.reload();
-                    return;
-                }
-                if (data.qr) {
-                    document.getElementById('qr-img').src = data.qr;
-                    document.getElementById('qr-img').style.display = 'block';
-                    document.getElementById('qr-status').textContent = 'Scan with WhatsApp to connect';
-                } else {
-                    document.getElementById('qr-status').textContent = 'Waiting for QR code...';
-                }
-            } catch (e) { }
-        }
-        fetchQr();
-        setInterval(fetchQr, 20000);
-    </script>
+    <% if (waStatus !== 'connected') { %>
+        <script>
+            async function fetchQr() {
+                try {
+                    const res = await fetch('/qr/data');
+                    const data = await res.json();
+                    if (data.status === 'connected') {
+                        window.location.replace('/');
+                        return;
+                    }
+                    if (data.qr) {
+                        document.getElementById('qr-img').src = data.qr;
+                        document.getElementById('qr-img').style.display = 'block';
+                        document.getElementById('qr-status').textContent = 'Scan with WhatsApp to connect';
+                    } else {
+                        document.getElementById('qr-status').textContent = 'Waiting for QR code...';
+                    }
+                } catch (e) { }
+            }
+            fetchQr();
+            setInterval(fetchQr, 20000);
+        </script>
+        <% } %>
 </body>
 
 </html>
