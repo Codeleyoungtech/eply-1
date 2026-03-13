@@ -13,7 +13,7 @@ function getDb() {
 }
 
 function initDb() {
-    const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'eply.db');
+    const dbPath = process.env.DB_PATH || '/data/eply.db';
 
     // Ensure parent directory exists (e.g. /data on Railway)
     const dir = path.dirname(dbPath);

@@ -18,7 +18,7 @@ async function boot() {
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     // ── 1. Ensure /data dir exists (Railway Volume) ────────────────────────
-    const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'eply.db');
+    const dbPath = process.env.DB_PATH || '/data/eply.db';
     const dbDir = path.dirname(dbPath);
     if (!fs.existsSync(dbDir)) {
         fs.mkdirSync(dbDir, { recursive: true });

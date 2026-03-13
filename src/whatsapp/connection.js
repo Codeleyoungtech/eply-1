@@ -39,7 +39,7 @@ function getQrDataUrl() { return currentQrDataUrl; }
 function getStatus() { return connectionStatus; }
 
 async function connectToWhatsApp() {
-    const authDir = path.join(process.cwd(), 'auth_info_baileys');
+    const authDir = process.env.AUTH_DIR || path.join('/data', 'auth_info_baileys');
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
