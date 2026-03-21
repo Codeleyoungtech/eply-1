@@ -28,7 +28,7 @@ router.post('/', (req, res) => {
         never_say: req.body.never_say,
         punctuation: req.body.punctuation,
     };
-    // Remove undefined/empty fields
+    // Remove undefined/empty field
     Object.keys(fields).forEach(k => { if (!fields[k]) delete fields[k]; });
     saveIdentity(fields);
     res.redirect('/identity?saved=1');
