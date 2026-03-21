@@ -1,36 +1,34 @@
 'use strict';
 
 /**
- * Central Message Handler — receives all WhatsApp messages and orchestrates
- * the full reply pipeline: rules → LLM → send → log → memory → notify.
+ * Central Message Handler
+ * Pipeline order:
+ *  1. Built-in commands (!ping, !help, etc.) — always work, no LLM
+ *  2. Bot guard (skip own messages, status broadcasts, history)
+ *  3. Auto-reply master switch (env + DB setting)
+ *  4. Reply rules (VIP guard, group silent logic, spam)
+ *  5. LLM routing → send reply
  */
 
-const {
-    jidNormalizedUser,
-    getContentType,
-    normalizeMessageContent,
-} = require('baileys');
+const { jidNormalizedUser, getContentType } = require('baileys');
+const { isCommand, runCommand } = require('../engine/commands');
 const { applyReplyRules } = require('../engine/replyRules');
 const { routeAndReply } = require('../engine/llmRouter');
 const { getConversationContext } = require('../engine/contextManager');
 const { extractAndStore, getContactMemories } = require('../engine/memoryManager');
 const { detectUrgency, resetFollowUp } = require('../engine/urgencyDetector');
 const { sendUrgentPing } = require('../engine/notifier');
-const { isVip, saveMessage, flagMessage, getSetting } = require('../db/queries');
-const { sendMessage, getClient, getStatus } = require('./connection');
+const { saveMessage, flagMessage, getSetting } = require('../db/queries');
+const { sendMessage, getClient } = require('./connection');
 const { logger } = require('../logger');
 
-function getInnerMessage(msg) {
-    return normalizeMessageContent(msg?.message) || msg?.message || null;
-}
+// ── Text extraction helpers ────────────────────────────────────────────────────
 
-/** Extract text content from a Baileys message object */
 function extractText(msg) {
-    const inner = getInnerMessage(msg);
-    if (!inner) return null;
-    const type = getContentType(inner);
+    if (!msg.message) return null;
+    const type = getContentType(msg.message);
     if (!type) return null;
-    const m = inner[type];
+    const m = msg.message[type];
     if (typeof m === 'string') return m;
     if (m?.text) return m.text;
     if (m?.caption) return m.caption;
@@ -38,223 +36,164 @@ function extractText(msg) {
     return null;
 }
 
-/** Extract media type from a Baileys message */
 function extractMediaType(msg) {
-    const inner = getInnerMessage(msg);
-    if (!inner) return null;
-    const type = getContentType(inner);
-    if (!type) return null;
-    if (type === 'imageMessage') return 'image';
-    if (type === 'audioMessage') return 'audio';
+    const type = getContentType(msg?.message);
+    if (type === 'imageMessage')    return 'image';
+    if (type === 'audioMessage')    return 'audio';
     if (type === 'documentMessage') return 'document';
-    if (type === 'videoMessage') return 'video';
+    if (type === 'videoMessage')    return 'video';
     return null;
 }
 
-/** Extract the display name from a message */
 function extractName(msg) {
-    return (
-        msg.pushName ||
-        msg.key?.remoteJid?.split('@')[0] ||
-        'Unknown'
-    );
+    return msg.pushName || msg.key?.remoteJid?.split('@')[0] || 'Unknown';
 }
 
-/** Check if the message @mentions our number or name */
-function checkMentions(msg, adminNumber, adminName) {
+function isMentioned(msg, adminNumber) {
     const body = extractText(msg) || '';
-    const inner = getInnerMessage(msg);
-    const mentioned = inner?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
     const adminJid = `${adminNumber}@s.whatsapp.net`;
-
-    // Direct @mention of admin number
-    if (mentioned.includes(adminJid)) return true;
-    // @mention by name in text
-    if (adminName && body.toLowerCase().includes(adminName.toLowerCase())) return true;
-    // @mention of the bot itself (same number)
-    if (body.includes(`@${adminNumber}`)) return true;
-
-    return false;
+    return mentioned.includes(adminJid) || body.includes(`@${adminNumber}`);
 }
 
-/** Check if this is a reply to one of our previously sent messages */
-function checkReplyToMe(msg) {
-    const inner = getInnerMessage(msg);
-    const quotedId = inner?.extendedTextMessage?.contextInfo?.stanzaId;
-    const quotedParticipant = inner?.extendedTextMessage?.contextInfo?.participant;
-    // If there's a quoted message and it's attributed to us (fromMe pattern)
-    return !!quotedId && !quotedParticipant; // rough heuristic — fromMe quoted msgs have no participant
+function isReplyToMe(msg) {
+    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+    const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    return !!quotedId && !quotedParticipant;
 }
 
-function runOwnerCommand(commandText, { waStatus, autoReplyEnabled }) {
-    const cmd = commandText.trim().toLowerCase();
-    if (cmd === '!help') {
-        return [
-            'EPLY owner commands:',
-            '!help - list commands',
-            '!status - WhatsApp + auto-reply status',
-            '!where - where to view messages',
-            'Dashboard messages: /chats and /chats/<contact>',
-        ].join('\n');
-    }
-    if (cmd === '!status') {
-        return `Status: ${waStatus}\nAuto-reply: ${autoReplyEnabled ? 'enabled' : 'disabled'}`;
-    }
-    if (cmd === '!where') {
-        return 'Open dashboard -> /chats to see all conversations, then click "View Thread" for full messages.';
-    }
-    return null;
-}
+// ── Master handler ────────────────────────────────────────────────────────────
 
 async function handleMessage(msg) {
     try {
+        // ── Guard: must have a message body ───────────────────────────────────
         if (!msg?.message) return;
-
-        // Ignore messages sent by THIS bot instance (Baileys IDs start with BAE5)
-        const isBotMsg = msg.key.id?.startsWith('BAE5');
-        if (isBotMsg) return;
 
         const jid = msg.key.remoteJid;
         if (!jid) return;
         if (jid === 'status@broadcast') return;
 
+        // ── Guard: ignore bot's own outgoing messages (not self-chat) ─────────
         const sock = getClient();
         const myJid = sock?.user?.id ? jidNormalizedUser(sock.user.id) : null;
         const isSelfChat = myJid && jidNormalizedUser(jid) === myJid;
 
         const isGroup = jid.endsWith('@g.us');
-        const phone = isGroup
-            ? (msg.key.participant || '').replace(/[^0-9]/g, '')
-            : jid.replace(/[^0-9]/g, '');
-
         const text = extractText(msg);
         const mediaType = extractMediaType(msg);
         const contactName = extractName(msg);
-        const parsedType = getContentType(getInnerMessage(msg) || {});
-
-        logger.debug('Parsed incoming message', {
-            id: msg.key?.id,
-            jid,
-            parsedType: parsedType || 'unknown',
-            hasText: !!text,
-            hasMedia: !!mediaType,
-            fromMe: !!msg.key?.fromMe,
-        });
-
-        // ── Save message to context (even if we sent it manually) ─────────────
-        const direction = msg.key.fromMe && !isSelfChat ? 'out' : 'in';
-        if (text || mediaType) {
-            saveMessage({
-                jid,
-                contactName,
-                direction,
-                content: text,
-                mediaType,
-                isGroup,
-                llmUsed: msg.key.fromMe ? 'manual' : null
-            });
-        }
-
-        if (msg.key.fromMe && !isSelfChat) {
-            // This is a manual reply sent from our phone to someone else.
-            // It's saved for DB context, but we DO NOT want EPLY to reply.
-            return;
-        }
-
         const adminNumber = process.env.ADMIN_NUMBER || '';
-        const adminName = ''; // populated from identity if set
+        const isAdmin = adminNumber && jid.startsWith(adminNumber);
 
-        const mentionedMe = isGroup ? checkMentions(msg, adminNumber, adminName) : false;
-        const replyToMe = isGroup ? checkReplyToMe(msg) : false;
-
-        const autoReplyEnabled = getSetting('auto_reply_enabled') !== 'false'
-            && process.env.AUTO_REPLY_ENABLED !== 'false';
-
-        logger.info('Message received', { jid, isSelfChat, isGroup, preview: (text || '').slice(0, 60) });
-
-        const normalizedAdmin = (process.env.ADMIN_NUMBER || '').replace(/[^0-9]/g, '');
-        const isAdminDm = !isGroup && normalizedAdmin && phone === normalizedAdmin;
-        const isOwnerCommand = !isGroup && text && text.trim().startsWith('!') && (isSelfChat || isAdminDm);
-        if (isOwnerCommand) {
-            const commandReply = runOwnerCommand(text, { waStatus: getStatus(), autoReplyEnabled });
-            if (commandReply) {
-                await sendMessage(jid, commandReply);
-                saveMessage({ jid, contactName, direction: 'out', content: commandReply, llmUsed: 'manual', isGroup });
-                logger.info('Owner command handled', { jid, command: text.trim().toLowerCase() });
+        // ── 1. Built-in commands — ALWAYS work regardless of auto-reply toggle ─
+        if (text && isCommand(text)) {
+            const cmdReply = await runCommand({ text, jid, isAdmin });
+            if (cmdReply) {
+                await sendMessage(jid, cmdReply);
+                saveMessage({ jid, contactName, direction: 'out', content: cmdReply, llmUsed: 'builtin', isGroup });
+                logger.info('Command handled', { jid, cmd: text.split(' ')[0] });
                 return;
             }
         }
 
-        // ── Extract memory facts from DMs ─────────────────────────────────────
-        if (!isGroup && text) {
-            extractAndStore(jid, contactName, text);
+        // ── Bot guard: skip own outgoing messages (except self-chat for testing)
+        if (msg.key.fromMe && !isSelfChat) {
+            // Save to context so LLM knows what we've already said manually
+            if (text) saveMessage({ jid, contactName, direction: 'out', content: text, mediaType, isGroup, llmUsed: 'manual' });
+            return;
         }
 
-        // ── Apply hardcoded reply rules ───────────────────────────────────────
-        const ruleResult = applyReplyRules({
-            jid, phone, text, isGroup, mentionedMe, replyToMe, adminNumber, autoReplyEnabled,
+        // ── Log every real message received ───────────────────────────────────
+        logger.info('▶ Message received', {
+            from: contactName,
+            jid,
+            isSelfChat,
+            isGroup,
+            preview: (text || `[${mediaType}]` || '(empty)').slice(0, 80),
         });
 
-        logger.debug('Rule result', { action: ruleResult.action, reason: ruleResult.reason });
+        // ── Save incoming message to DB ────────────────────────────────────────
+        if (text || mediaType) {
+            saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
+        }
 
-        if (ruleResult.action === 'silent') {
-            // VIP silent — still check urgency for ping
-            if (ruleResult.isVip) {
-                const urgency = detectUrgency({ jid, text, isVip: true });
-                if (urgency.urgent) {
-                    await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: 'vip_urgent', isVip: true });
-                }
-            }
+        // ── Extract memory facts ───────────────────────────────────────────────
+        if (!isGroup && text) extractAndStore(jid, contactName, text);
+
+        // ── 2. Auto-reply master switch ────────────────────────────────────────
+        const autoReplyEnvOn  = process.env.AUTO_REPLY_ENABLED === 'true';
+        const autoReplyDbOn   = getSetting('auto_reply_enabled') === 'true';
+        const autoReplyEnabled = autoReplyEnvOn || autoReplyDbOn;
+
+        if (!autoReplyEnabled) {
+            logger.info('Auto-reply is OFF — message logged but not replied. Send !on to enable.', { jid });
             return;
         }
 
-        if (ruleResult.action === 'ping_only') {
-            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: ruleResult.reason, isVip: ruleResult.isVip });
+        // ── 3. Reply rules (VIP, group, spam) ─────────────────────────────────
+        const mentionedMe = isGroup ? isMentioned(msg, adminNumber) : false;
+        const replyToMe   = isGroup ? isReplyToMe(msg) : false;
+
+        const rule = applyReplyRules({
+            jid, phone: jid.replace(/[^0-9]/g, ''), text, isGroup,
+            mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true, // we already checked above
+        });
+
+        logger.debug('Rule result', { action: rule.action, reason: rule.reason });
+
+        if (rule.action === 'silent') return;
+
+        if (rule.action === 'ping_only') {
+            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: rule.reason, isVip: rule.isVip });
             return;
         }
 
-        if (ruleResult.action === 'vague_flag') {
-            // Generate vague reply and flag it
+        if (rule.action === 'vague_flag') {
             const vagueReplies = [
-                "haha let me check my situation",
-                "yeah need to look into that properly",
-                "haha let me get back to you on that one",
-                "that's a whole conversation — let's catch up soon?",
-                "lol let me think on that one",
+                'haha let me check on that',
+                'yeah need to look into that properly',
+                'lol let me get back to you on that one',
+                "that's a whole conversation, catch up soon?",
             ];
             const vagueReply = vagueReplies[Math.floor(Math.random() * vagueReplies.length)];
             await sendMessage(jid, vagueReply);
             saveMessage({ jid, contactName, direction: 'out', content: vagueReply, llmUsed: null, isGroup });
-            flagMessage({ jid, contactName, theirMsg: text, eplyReply: vagueReply, reason: ruleResult.reason });
-            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: vagueReply, reason: ruleResult.reason, isVip: false });
+            flagMessage({ jid, contactName, theirMsg: text, eplyReply: vagueReply, reason: rule.reason });
             return;
         }
 
-        // ── action === 'reply' — Generate LLM reply ───────────────────────────
-        const history = getConversationContext(jid, 15);
+        // ── 4. LLM reply ──────────────────────────────────────────────────────
+        // Check API keys first — helpful error instead of silent failure
+        const hasAnyKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
+        if (!hasAnyKey) {
+            const noKeyMsg = "hey, EPLY isn't fully configured yet — add at least a Groq API key in settings 🔧";
+            await sendMessage(jid, noKeyMsg);
+            logger.warn('No LLM API keys configured — sent placeholder reply');
+            return;
+        }
+
+        const history  = getConversationContext(jid, 15);
         const memories = getContactMemories(jid);
 
         const { reply, llm } = await routeAndReply({
-            jid, contactName, incomingText: text, mediaType, mediaBuffer: null, // media download omitted for now
-            history, memories, isGroup,
+            jid, contactName, incomingText: text, mediaType,
+            mediaBuffer: null, history, memories, isGroup,
         });
 
-        // ── Check for urgency on normal replies too ───────────────────────────
-        const { urgent, reason: urgReason } = ruleResult.urgency || {};
-        if (urgent && urgReason !== 'normal') {
-            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: reply, reason: urgReason, isVip: false });
+        // ── Urgency check ──────────────────────────────────────────────────────
+        if (rule.urgency?.urgent) {
+            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: reply, reason: rule.urgency.reason, isVip: false });
         }
 
         // ── Send reply ────────────────────────────────────────────────────────
         await sendMessage(jid, reply);
         resetFollowUp(jid);
-
-        // ── Save outgoing message ─────────────────────────────────────────────
         saveMessage({ jid, contactName, direction: 'out', content: reply, llmUsed: llm, isGroup });
 
-        logger.info('Reply sent', { jid, llm, preview: reply.slice(0, 80) });
+        logger.info('✅ Reply sent', { jid, llm, preview: reply.slice(0, 80) });
+
     } catch (err) {
-        logger.error('Message handler error', { err: err.message, stack: err.stack });
+        logger.error('Message handler crashed', { err: err.message, stack: err.stack?.split('\n')[1] });
     }
 }
 
