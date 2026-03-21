@@ -277,12 +277,17 @@ async function handleMessage(msg) {
             return;
         }
 
-        const history = trimHistoryForLlm(getConversationContext(jid, 12));
+        const context = getConversationContext(jid, {
+            fullWindow: 12,
+            summaryThreshold: 30,
+            fetchLimit: 80,
+        });
+        const history = trimHistoryForLlm(context.recent);
         const memories = trimMemoriesForLlm(getContactMemories(jid));
 
         const { reply, llm } = await routeAndReply({
             jid, contactName, incomingText: normalizeIncomingText(text), mediaType,
-            mediaBuffer: null, history, memories, isGroup,
+            mediaBuffer: null, history, historySummary: context.summary, memories, isGroup,
         });
 
         if (!reply) {

@@ -153,6 +153,7 @@ async function routeAndReply(ctx) {
             contactName: ctx.contactName,
             incomingText: ctx.incomingText,
             history: ctx.history,
+            historySummary: ctx.historySummary,
             memories: ctx.memories,
             toneCtx,
             model,

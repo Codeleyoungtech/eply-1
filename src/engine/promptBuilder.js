@@ -6,7 +6,7 @@
  * Adds per-model addenda (Groq, Gemini, Claude) from PRD §7.2.
  */
 
-function buildPrompt({ identity, contactName, incomingText, history = [], memories = [], toneCtx, model }) {
+function buildPrompt({ identity, contactName, incomingText, history = [], memories = [], toneCtx, model, historySummary = null }) {
     const now = new Date().toLocaleString('en-GB', {
         timeZone: identity.timezone || 'Africa/Johannesburg',
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -98,6 +98,10 @@ Tone instruction: ${toneInstruction}
 # MEMORIES ABOUT THIS CONTACT
 ${memoriesText}
 
+${historySummary ? `# CONVERSATION SUMMARY
+${historySummary}
+` : ''}
+
 # REPLY RULES — follow these without exception
 1. Sound like a human texting — not an assistant responding to a query
 2. Match their energy: casual if casual, professional if formal
@@ -110,7 +114,8 @@ ${memoriesText}
 8. If unsure about a detail of ${name}'s life — be vague naturally
 9. Do not use em-dashes, bullet points, or markdown formatting
 10. Write exactly how ${name} would write — not how an AI thinks they write
-11. Off-limits topics: ${clamp(identity.off_limits || 'money transfers, legal advice, medical advice', 220)}
+11. Use correct punctuation. End sentences properly. Capitalize the first word of every sentence. Do not skip full stops or commas where they belong, even in casual messages.
+12. Off-limits topics: ${clamp(identity.off_limits || 'money transfers, legal advice, medical advice', 220)}
     → Stay brief and non-committal for these. Never engage directly.
 
 ${buildModelAddendum(model, name)}

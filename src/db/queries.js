@@ -30,7 +30,20 @@ function getVips() {
 
 function isVip(phone) {
     const normalized = phone.replace(/[^0-9]/g, '');
-    return !!getDb().prepare('SELECT 1 FROM vip_list WHERE phone = ?').get(normalized);
+    if (!normalized) return false;
+
+    const candidates = new Set([
+        normalized,
+        normalized.slice(-10),
+        normalized.slice(-11),
+    ]);
+
+    const rows = getDb().prepare('SELECT phone FROM vip_list').all();
+    return rows.some(({ phone: storedPhone }) => {
+        const stored = String(storedPhone || '').replace(/[^0-9]/g, '');
+        if (!stored) return false;
+        return candidates.has(stored) || candidates.has(stored.slice(-10)) || candidates.has(stored.slice(-11));
+    });
 }
 
 function addVip(phone, label) {
