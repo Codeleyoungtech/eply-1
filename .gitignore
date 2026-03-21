@@ -5,7 +5,7 @@ node_modules/
 .env
 .env.local
 .env.*.local
-.env.example
+# .env.example is intentionally committed — it's a template
 
 # ── WhatsApp Session ──────────────────────────────────
 auth_info_baileys/

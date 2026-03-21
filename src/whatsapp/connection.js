@@ -32,6 +32,9 @@ waEmitter.setMaxListeners(20);
 let sock = null;
 let currentQrDataUrl = null;
 let connectionStatus = 'disconnected'; // disconnected | connecting | connected
+
+// Track IDs of messages WE sent — so we never reply to ourselves
+const sentMessageIds = new Set();
 const recentlyForwarded = new Map(); // key -> unix seconds
 
 function getClient() { return sock; }
@@ -97,10 +100,11 @@ async function connectToWhatsApp() {
 
     // ── Message listener ─────────────────────────────────────────────────────
     const sessionStartTime = Date.now() / 1000 - 30; // ignore anything older than 30s
-    const acceptedUpsertTypes = new Set(['notify', 'append']);
+    const recentlyForwarded = new Map();
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
-        if (!acceptedUpsertTypes.has(type)) return;
+        // Only 'notify' = new real-time message. 'append' = history batch — skip.
+        if (type !== 'notify') return;
         logger.debug('messages.upsert fired', { type, count: messages.length });
 
         for (const msg of messages) {
@@ -109,31 +113,30 @@ async function connectToWhatsApp() {
             const remote = msg.key?.remoteJid || '';
             const dedupeKey = `${remote}:${id}`;
 
-            // Drop duplicates (same message can arrive through multiple upsert batches)
-            const now = Math.floor(Date.now() / 1000);
-            if (id && recentlyForwarded.has(dedupeKey)) {
+            // ── LOOP GUARD: skip messages EPLY itself sent ─────────────────
+            if (id && sentMessageIds.has(id)) {
+                logger.debug('Skipping our own sent message', { id });
                 continue;
             }
-            if (id) {
-                recentlyForwarded.set(dedupeKey, now);
-            }
 
-            // Keep dedupe map small (10-minute TTL)
+            // Drop duplicates across multiple upsert batches for same message
+            const now = Math.floor(Date.now() / 1000);
+            if (id && recentlyForwarded.has(dedupeKey)) continue;
+            if (id) recentlyForwarded.set(dedupeKey, now);
+
+            // Clean up dedupe map (10-min TTL)
             for (const [k, seenAt] of recentlyForwarded.entries()) {
                 if (now - seenAt > 600) recentlyForwarded.delete(k);
             }
 
             // Drop historical messages synced at boot
             if (ts > 0 && ts < sessionStartTime) {
-                logger.debug('Ignoring historical message', { ts, sessionStart: sessionStartTime });
+                logger.debug('Ignoring historical message', { ts });
                 continue;
             }
 
             logger.debug('Forwarding message to handler', {
-                id,
-                from: remote,
-                fromMe: msg.key?.fromMe,
-                type,
+                id, from: remote, fromMe: msg.key?.fromMe,
             });
 
             waEmitter.emit('message', msg);
@@ -145,11 +148,17 @@ async function connectToWhatsApp() {
 
 /**
  * Send a text message via the active WhatsApp socket.
+ * Tracks the sent message ID to prevent the bot from replying to itself.
  */
 async function sendMessage(jid, text) {
     if (!sock) throw new Error('WhatsApp not connected');
-    await sock.sendMessage(jid, { text });
-    logger.debug('Message sent', { jid, preview: text.slice(0, 60) });
+    const result = await sock.sendMessage(jid, { text });
+    const msgId = result?.key?.id;
+    if (msgId) {
+        sentMessageIds.add(msgId);
+        setTimeout(() => sentMessageIds.delete(msgId), 30_000); // auto-clean after 30s
+    }
+    logger.debug('Message sent', { jid, msgId, preview: text.slice(0, 60) });
 }
 
 module.exports = { connectToWhatsApp, getClient, getQrDataUrl, getStatus, sendMessage, waEmitter };
