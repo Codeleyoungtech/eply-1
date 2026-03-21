@@ -41,28 +41,38 @@ function getClient() { return sock; }
 function getQrDataUrl() { return currentQrDataUrl; }
 function getStatus() { return connectionStatus; }
 
+// Cache the WA version — fetched ONCE, reused on every reconnect
+// Without this, every reconnect makes an extra HTTP request → adds delay
+let cachedVersion = null;
+async function getVersion() {
+    if (!cachedVersion) {
+        const result = await fetchLatestBaileysVersion();
+        cachedVersion = result.version;
+        logger.info('WA version fetched', { version: cachedVersion });
+    }
+    return cachedVersion;
+}
+
+// Silent pino logger — suppresses ALL internal Baileys log noise
+const pinoSilent = require('pino')({ level: 'silent' });
+
 async function connectToWhatsApp() {
     const authDir = process.env.AUTH_DIR || path.join(process.cwd(), 'auth_info_baileys');
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
-    const { version } = await fetchLatestBaileysVersion();
+    const version = await getVersion(); // cached — no HTTP round-trip on reconnects
 
     logger.info('Connecting to WhatsApp', { version });
     connectionStatus = 'connecting';
 
-    // pino with level 'silent' kills ALL internal Baileys log output
-    const makeSilentLogger = () => {
-        const pino = require('pino');
-        return pino({ level: 'silent' });
-    };
-
     sock = makeWASocket({
         version,
         auth: state,
-        logger: makeSilentLogger(),
+        logger: pinoSilent,
         browser: ['EPLY', 'Chrome', '120.0.0'],
         generateHighQualityLinkPreview: false,
-        syncFullHistory: false,        // don't waste time syncing old messages
-        markOnlineOnConnect: false,    // don't mark as online (keeps last-active clean)
+        syncFullHistory: false,        // don't sync old messages — starts fast
+        markOnlineOnConnect: false,    // keeps last-active timestamp clean
+        keepAliveIntervalMs: 25_000,   // ping WA every 25s to prevent 408 timeouts
     });
 
     sock.ev.on('creds.update', saveCreds);
