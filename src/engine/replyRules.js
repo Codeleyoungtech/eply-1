@@ -66,8 +66,8 @@ function applyReplyRules({ jid, phone, text, isGroup, mentionedMe, replyToMe, ad
         if (text && GM_PATTERNS.some(p => p.test(text.trim()))) {
             return { action: 'silent', reason: 'group_gm' };
         }
-        // Only reply if we're actually needed
-        if (!mentionedMe && !replyToMe) {
+        // Default group scope: reply only when explicitly tagged unless overridden.
+        if (!mentionedMe && process.env.ALLOW_GROUP_UNTAGGED_AI !== 'true') {
             return { action: 'silent', reason: 'group_no_trigger' };
         }
         // We ARE needed — fall through to reply logic
@@ -77,7 +77,7 @@ function applyReplyRules({ jid, phone, text, isGroup, mentionedMe, replyToMe, ad
     // ── 5. Urgency detection (for DMs) ───────────────────────────────────────
     const urgency = detectUrgency({ jid, text, isVip: false });
     if (urgency.financial) {
-        return { action: 'vague_flag', reason: 'financial_legal', urgency };
+        return { action: 'reply', reason: 'financial_legal', urgency };
     }
 
     // ── 6. Sensitive topics direct check (backup to tone classifier) ──────────

@@ -29,6 +29,10 @@ async function callGemini(systemPrompt, messages, mediaBuffer = null, mediaType 
     const model = genAIClient.getGenerativeModel({
         model: 'gemini-2.0-flash',
         systemInstruction: systemPrompt,
+        generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 160,
+        },
     });
 
     // Build content parts

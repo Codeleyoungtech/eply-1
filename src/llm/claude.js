@@ -26,7 +26,7 @@ async function callClaude(systemPrompt, messages) {
     const client = getClaudeClient();
     const response = await client.messages.create({
         model: 'claude-sonnet-4-5',
-        max_tokens: 500,
+        max_tokens: 220,
         system: systemPrompt,
         messages: messages.map(m => ({
             role: m.role === 'assistant' ? 'assistant' : 'user',

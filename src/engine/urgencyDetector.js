@@ -19,7 +19,6 @@ const URGENCY_KEYWORDS = [
     /\b(asap|a\.s\.a\.p)\b/i,
     /\b(call me (now|please|urgently)?)\b/i,
     /\bsos\b/i,
-    /\b(please|plz|pls)\b/i,
     /\b(i need help|need your help)\b/i,
     /\b(are you ok|are you okay|you okay|u ok)\b/i,
     /\b(please respond|please reply|respond please)\b/i,
@@ -32,7 +31,8 @@ const DISTRESS_KEYWORDS = [
 ];
 
 const FINANCIAL_LEGAL_KEYWORDS = [
-    /\b(send me|lend me|transfer|r\d{2,5}|£\d+|\$\d+|pay me back|money)\b/i,
+    /\b(send me|lend me|borrow|transfer|pay me back|invoice|deposit|bank details|account number)\b/i,
+    /\b(r\d{2,5}|£\d+|\$\d+|₦\d+)\b/i,
     /\b(contract|legal|lawyer|attorney|sue|court|lawsuit)\b/i,
 ];
 
@@ -62,9 +62,9 @@ function detectUrgency({ jid, text, isVip }) {
         return { urgent: true, financial: false, reason: 'distress_language' };
     }
 
-    // Financial / legal — urgent + flagged
+    // Financial / legal — careful handling, but not an urgent escalation by itself
     if (FINANCIAL_LEGAL_KEYWORDS.some(p => p.test(t))) {
-        return { urgent: true, financial: true, reason: 'financial_legal' };
+        return { urgent: false, financial: true, reason: 'financial_legal' };
     }
 
     // Follow-up detection — 3+ messages in 30 min with no reply

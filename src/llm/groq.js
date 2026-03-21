@@ -2,7 +2,7 @@
 
 /**
  * Groq LLM Client — fast path for ~80% of DM replies.
- * Model: llama-3.3-70b-versatile
+ * Model: llama-3.1-8b-instant
  */
 
 const Groq = require('groq-sdk');
@@ -25,13 +25,13 @@ function getGroqClient() {
 async function callGroq(systemPrompt, messages) {
     const client = getGroqClient();
     const response = await client.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-8b-instant',
         messages: [
             { role: 'system', content: systemPrompt },
             ...messages,
         ],
-        temperature: 0.85,
-        max_tokens: 300,
+        temperature: 0.7,
+        max_tokens: 120,
         top_p: 0.95,
     });
 
