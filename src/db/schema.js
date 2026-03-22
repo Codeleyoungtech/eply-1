@@ -106,6 +106,30 @@ function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_memory_jid ON memory (jid);
 
+    -- ── Contact Profiles ────────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS contact_profiles (
+      jid               TEXT PRIMARY KEY,
+      display_name      TEXT,
+      tone_preference   TEXT DEFAULT 'auto',
+      respectful_titles INTEGER DEFAULT 1,
+      witty_allowed     INTEGER DEFAULT 0,
+      muted             INTEGER DEFAULT 0,
+      updated_at        INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    -- ── LLM Usage Metrics ───────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS llm_usage (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      jid              TEXT,
+      provider         TEXT NOT NULL,
+      model            TEXT,
+      estimated_input  INTEGER DEFAULT 0,
+      estimated_output INTEGER DEFAULT 0,
+      estimated_total  INTEGER DEFAULT 0,
+      created_at       INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage (created_at);
+
     -- ── Scheduler Jobs ──────────────────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS scheduler_jobs (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +156,11 @@ function initDb() {
       ('digest_time',        '07:00'),
       ('digest_timezone',    'Africa/Johannesburg'),
       ('urgency_keywords',   '["urgent","emergency","asap","call me","sos","please","i need help","are you okay","please respond"]'),
-      ('log_level',          'info');
+      ('log_level',          'info'),
+      ('daily_reply_limit',  '80'),
+      ('daily_estimated_token_limit', '12000'),
+      ('store_group_messages', 'false'),
+      ('reply_style_guard',  'true');
   `);
 
     logger.info('Database initialised', { path: dbPath });

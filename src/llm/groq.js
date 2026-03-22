@@ -30,7 +30,7 @@ async function callGroq(systemPrompt, messages) {
             { role: 'system', content: systemPrompt },
             ...messages,
         ],
-        temperature: 0.7,
+        temperature: 0.45,
         max_tokens: 120,
         top_p: 0.95,
     });

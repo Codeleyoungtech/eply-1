@@ -22,8 +22,9 @@ router.get('/', (req, res) => {
 });
 
 router.post('/add', (req, res) => {
-    const { phone, label } = req.body;
-    if (phone) addVip(phone, label);
+    const identifier = req.body.identifier || req.body.phone;
+    const { label } = req.body;
+    if (identifier) addVip(identifier, label);
     res.redirect('/vip?saved=added');
 });
 

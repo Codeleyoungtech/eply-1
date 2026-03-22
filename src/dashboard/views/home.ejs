@@ -104,6 +104,12 @@
                                     </div>
                                 </div>
                             </div>
+                            <div style="margin-top:16px;display:flex;gap:24px;flex-wrap:wrap;color:var(--muted);font-size:13px">
+                                <div>Calls: <strong style="color:var(--text)"><%= llmUsage.calls || 0 %></strong></div>
+                                <div>Estimated input: <strong style="color:var(--text)"><%= llmUsage.estimated_input || 0 %></strong></div>
+                                <div>Estimated output: <strong style="color:var(--text)"><%= llmUsage.estimated_output || 0 %></strong></div>
+                                <div>Estimated total: <strong style="color:var(--text)"><%= llmUsage.estimated_total || 0 %></strong></div>
+                            </div>
                         </div>
 
                         <!-- Quick links -->

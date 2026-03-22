@@ -6,7 +6,7 @@
  * Adds per-model addenda (Groq, Gemini, Claude) from PRD §7.2.
  */
 
-function buildPrompt({ identity, contactName, incomingText, history = [], memories = [], toneCtx, model, historySummary = null }) {
+function buildPrompt({ identity, contactName, incomingText, history = [], memories = [], toneCtx, model, historySummary = null, contactProfile = null }) {
     const now = new Date().toLocaleString('en-GB', {
         timeZone: identity.timezone || 'Africa/Johannesburg',
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -120,6 +120,8 @@ ${historySummary}
 
 ${buildModelAddendum(model, name)}
 
+${buildContactProfileAddendum(contactProfile)}
+
 ${buildPersonaAddendum({
         isEleyoungtechPersona,
         timeOfDay,
@@ -189,6 +191,38 @@ ${hasOutgoingToday ? 'This is not the first reply of the day to this contact, so
 Good ${timeOfDay} sir.
 Your face is bright 😎.
 How are you doing sir?`}`;
+}
+
+function buildContactProfileAddendum(contactProfile) {
+    if (!contactProfile) return '';
+
+    const lines = ['# CONTACT STYLE OVERRIDES'];
+
+    if (contactProfile.tone_preference && contactProfile.tone_preference !== 'auto') {
+        if (contactProfile.tone_preference === 'calm') {
+            lines.push('Keep the tone calm, plain, and steady. No dramatic phrasing.');
+        }
+        if (contactProfile.tone_preference === 'professional') {
+            lines.push('Keep the tone professional and measured.');
+        }
+        if (contactProfile.tone_preference === 'playful') {
+            lines.push('A little warmth and playfulness is fine, but stay concise.');
+        }
+    }
+
+    if (Number(contactProfile.respectful_titles) === 0) {
+        lines.push('Do not force respectful titles like sir, ma, or ma\'am for this contact.');
+    } else {
+        lines.push('Respectful titles are welcome for this contact when natural.');
+    }
+
+    if (Number(contactProfile.witty_allowed) === 0) {
+        lines.push('Do not be witty, sarcastic, teasing, or clever-for-the-sake-of-it. Be plain and direct.');
+    } else {
+        lines.push('Light wit is acceptable for this contact if the moment clearly supports it.');
+    }
+
+    return lines.join('\n');
 }
 
 module.exports = { buildPrompt };

@@ -28,26 +28,33 @@ function getVips() {
     return getDb().prepare('SELECT * FROM vip_list ORDER BY added_at DESC').all();
 }
 
-function isVip(phone) {
-    const normalized = phone.replace(/[^0-9]/g, '');
-    if (!normalized) return false;
+function isVip(phone, jid = '') {
+    const normalized = String(phone || '').replace(/[^0-9]/g, '');
+    const normalizedJid = String(jid || '').trim().toLowerCase();
 
     const candidates = new Set([
         normalized,
         normalized.slice(-10),
         normalized.slice(-11),
-    ]);
+        normalizedJid,
+    ].filter(Boolean));
 
     const rows = getDb().prepare('SELECT phone FROM vip_list').all();
     return rows.some(({ phone: storedPhone }) => {
-        const stored = String(storedPhone || '').replace(/[^0-9]/g, '');
-        if (!stored) return false;
-        return candidates.has(stored) || candidates.has(stored.slice(-10)) || candidates.has(stored.slice(-11));
+        const rawStored = String(storedPhone || '').trim();
+        const storedJid = rawStored.toLowerCase();
+        const stored = rawStored.replace(/[^0-9]/g, '');
+        return (
+            candidates.has(storedJid) ||
+            (stored && (candidates.has(stored) || candidates.has(stored.slice(-10)) || candidates.has(stored.slice(-11))))
+        );
     });
 }
 
-function addVip(phone, label) {
-    const normalized = phone.replace(/[^0-9]/g, '');
+function addVip(identifier, label) {
+    const raw = String(identifier || '').trim();
+    if (!raw) return null;
+    const normalized = raw.includes('@') ? raw.toLowerCase() : raw.replace(/[^0-9]/g, '');
     return getDb()
         .prepare('INSERT OR IGNORE INTO vip_list (phone, label) VALUES (?, ?)')
         .run(normalized, label || '');
@@ -73,6 +80,19 @@ function getThread(jid, limit = 30) {
         .reverse();
 }
 
+function deleteMessagesByIds(ids = []) {
+    const validIds = ids.map((id) => Number(id)).filter(Number.isInteger);
+    if (!validIds.length) return { changes: 0 };
+
+    return getDb()
+        .prepare(`DELETE FROM messages WHERE id IN (${validIds.map(() => '?').join(',')})`)
+        .run(...validIds);
+}
+
+function deleteMessagesByJid(jid) {
+    return getDb().prepare('DELETE FROM messages WHERE jid = ?').run(jid);
+}
+
 function getAllChats() {
     return getDb().prepare(`
     SELECT jid, contact_name, MAX(timestamp) as last_ts, COUNT(*) as total,
@@ -91,6 +111,25 @@ function getTodayStats() {
       SUM(CASE WHEN llm_used='gemini' THEN 1 ELSE 0 END) as gemini_count,
       SUM(CASE WHEN llm_used='claude' THEN 1 ELSE 0 END) as claude_count
     FROM messages WHERE timestamp > ?
+  `).get(dayStart);
+}
+
+function recordLlmUsage({ jid, provider, model, estimatedInput = 0, estimatedOutput = 0, estimatedTotal = 0 }) {
+    return getDb()
+        .prepare(`INSERT INTO llm_usage (jid, provider, model, estimated_input, estimated_output, estimated_total)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(jid || null, provider, model || null, estimatedInput, estimatedOutput, estimatedTotal);
+}
+
+function getTodayLlmUsage() {
+    const dayStart = Math.floor(Date.now() / 1000) - 86400;
+    return getDb().prepare(`
+    SELECT
+      COUNT(*) as calls,
+      COALESCE(SUM(estimated_input), 0) as estimated_input,
+      COALESCE(SUM(estimated_output), 0) as estimated_output,
+      COALESCE(SUM(estimated_total), 0) as estimated_total
+    FROM llm_usage WHERE created_at > ?
   `).get(dayStart);
 }
 
@@ -154,6 +193,45 @@ function updateFact(id, fact) {
     return getDb().prepare('UPDATE memory SET fact = ? WHERE id = ?').run(fact, id);
 }
 
+// ── Contact Profiles ─────────────────────────────────────────────────────────
+
+function getContactProfile(jid) {
+    return getDb().prepare('SELECT * FROM contact_profiles WHERE jid = ?').get(jid) || null;
+}
+
+function saveContactProfile({ jid, displayName, tonePreference, respectfulTitles, wittyAllowed, muted }) {
+    if (!jid) return null;
+
+    const existing = getContactProfile(jid) || {};
+    const payload = {
+        displayName: displayName !== undefined ? displayName : existing.display_name || null,
+        tonePreference: tonePreference !== undefined ? tonePreference : existing.tone_preference || 'auto',
+        respectfulTitles: respectfulTitles !== undefined ? respectfulTitles : (existing.respectful_titles ?? 1),
+        wittyAllowed: wittyAllowed !== undefined ? wittyAllowed : (existing.witty_allowed ?? 0),
+        muted: muted !== undefined ? muted : (existing.muted ?? 0),
+    };
+
+    return getDb()
+        .prepare(`INSERT INTO contact_profiles (jid, display_name, tone_preference, respectful_titles, witty_allowed, muted, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(jid) DO UPDATE SET
+                display_name = excluded.display_name,
+                tone_preference = excluded.tone_preference,
+                respectful_titles = excluded.respectful_titles,
+                witty_allowed = excluded.witty_allowed,
+                muted = excluded.muted,
+                updated_at = excluded.updated_at`)
+        .run(
+            jid,
+            payload.displayName,
+            payload.tonePreference,
+            payload.respectfulTitles ? 1 : 0,
+            payload.wittyAllowed ? 1 : 0,
+            payload.muted ? 1 : 0,
+            Math.floor(Date.now() / 1000)
+        );
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 function getSetting(key) {
@@ -197,10 +275,12 @@ function touchJob(id) {
 module.exports = {
     getIdentity, saveIdentity,
     getVips, isVip, addVip, removeVip,
-    saveMessage, getThread, getAllChats, getTodayStats,
+    saveMessage, getThread, getAllChats, getTodayStats, deleteMessagesByIds, deleteMessagesByJid,
+    recordLlmUsage, getTodayLlmUsage,
     flagMessage, getFlagged, markHandled,
     saveDigest, getDigests, markDigestDelivered,
     saveFact, getMemories, getAllMemories, deleteFact, updateFact,
+    getContactProfile, saveContactProfile,
     getSetting, setSetting, getAllSettings,
     getJobs, createJob, deleteJob, touchJob,
 };

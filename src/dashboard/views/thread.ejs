@@ -30,31 +30,94 @@
                             </div>
                         </div>
                     </div>
+                    <% if (saved) { %>
+                        <div class="alert alert-success">✅ Messages updated</div>
+                    <% } %>
+                    <div class="card" style="margin-bottom:16px">
+                        <div class="card-title">Thread Controls</div>
+                        <form method="POST" action="/chats/<%= encodeURIComponent(jid) %>/profile" class="grid-2">
+                            <div class="form-group" style="margin-bottom:0">
+                                <label class="form-label">Display Name</label>
+                                <input class="form-input" name="display_name" value="<%= contactProfile?.display_name || '' %>"
+                                    placeholder="Optional label for this thread" />
+                            </div>
+                            <div class="form-group" style="margin-bottom:0">
+                                <label class="form-label">Tone Preference</label>
+                                <select class="form-select" name="tone_preference">
+                                    <% ['auto','calm','professional','playful'].forEach(option => { %>
+                                        <option value="<%= option %>" <%= (contactProfile?.tone_preference || 'auto') === option ? 'selected' : '' %>><%= option %></option>
+                                    <% }) %>
+                                </select>
+                            </div>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">
+                                <input type="checkbox" name="respectful_titles" <%= Number(contactProfile?.respectful_titles ?? 1) === 1 ? 'checked' : '' %> />
+                                Use respectful titles
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">
+                                <input type="checkbox" name="witty_allowed" <%= Number(contactProfile?.witty_allowed ?? 0) === 1 ? 'checked' : '' %> />
+                                Allow wit/playfulness
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">
+                                <input type="checkbox" name="muted" <%= Number(contactProfile?.muted ?? 0) === 1 ? 'checked' : '' %> />
+                                Mute auto replies for this thread
+                            </label>
+                            <div style="display:flex;justify-content:flex-end">
+                                <button type="submit" class="btn btn-primary btn-sm">Save Thread Controls</button>
+                            </div>
+                        </form>
+                    </div>
                     <div class="card">
-                        <div class="thread">
-                            <% thread.forEach(m=> { %>
-                                <div
-                                    style="display:flex;flex-direction:column;align-items:<%= m.direction === 'out' ? 'flex-end' : 'flex-start' %>">
-                                    <div class="bubble bubble-<%= m.direction === 'out' ? 'out' : 'in' %>">
-                                        <%= m.content %>
-                                            <div class="bubble-meta">
-                                                <%= new
-                                                    Date(m.timestamp*1000).toLocaleString('en-GB',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'})
-                                                    %>
-                                                    <% if (m.llm_used) { %><span class="badge badge-<%= m.llm_used %>"
-                                                            style="margin-left:4px">
-                                                            <%= m.llm_used %>
-                                                        </span>
-                                                        <% } %>
+                        <form method="POST" action="/chats/<%= encodeURIComponent(jid) %>/delete-selected">
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
+                                <label style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px">
+                                    <input type="checkbox" id="select-all-messages" />
+                                    Select all
+                                </label>
+                                <button type="submit" class="btn btn-danger btn-sm">Delete Selected</button>
+                            </div>
+                            <div class="thread">
+                                <% thread.forEach(m=> { %>
+                                    <div
+                                        style="display:flex;flex-direction:column;align-items:<%= m.direction === 'out' ? 'flex-end' : 'flex-start' %>">
+                                        <label style="display:flex;align-items:flex-start;gap:10px;max-width:100%">
+                                            <input type="checkbox" name="message_ids" value="<%= m.id %>" class="message-checkbox"
+                                                style="margin-top:12px" />
+                                            <div class="bubble bubble-<%= m.direction === 'out' ? 'out' : 'in' %>">
+                                                <%= m.content %>
+                                                    <div class="bubble-meta">
+                                                        <%= new
+                                                            Date(m.timestamp*1000).toLocaleString('en-GB',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'})
+                                                            %>
+                                                            <% if (m.llm_used) { %><span class="badge badge-<%= m.llm_used %>"
+                                                                    style="margin-left:4px">
+                                                                    <%= m.llm_used %>
+                                                                </span>
+                                                                <% } %>
+                                                    </div>
                                             </div>
+                                        </label>
                                     </div>
-                                </div>
-                                <% }) %>
-                        </div>
+                                    <% }) %>
+                            </div>
+                        </form>
+                        <form method="POST" action="/chats/<%= encodeURIComponent(jid) %>/clear" style="margin-top:16px">
+                            <button type="submit" class="btn btn-danger btn-sm">Clear Entire Thread</button>
+                        </form>
                     </div>
                 </div>
             </main>
     </div>
+    <script>
+        const selectAll = document.getElementById('select-all-messages');
+        const checkboxes = Array.from(document.querySelectorAll('.message-checkbox'));
+        if (selectAll) {
+            selectAll.addEventListener('change', () => {
+                checkboxes.forEach((checkbox) => {
+                    checkbox.checked = selectAll.checked;
+                });
+            });
+        }
+    </script>
 </body>
 
 </html>

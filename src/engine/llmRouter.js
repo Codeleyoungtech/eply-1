@@ -5,7 +5,7 @@
  * Routes entirely based on hardcoded message-type logic from PRD §5.3.
  */
 
-const { getIdentity, getAllSettings } = require('../db/queries');
+const { getIdentity, getAllSettings, recordLlmUsage } = require('../db/queries');
 const { callGroq } = require('../llm/groq');
 const { callGemini } = require('../llm/gemini');
 const { callClaude } = require('../llm/claude');
@@ -102,6 +102,32 @@ async function callProvider(model, systemPrompt, messages, ctx) {
     return callGroq(systemPrompt, messages);
 }
 
+function estimateTokens(text = '') {
+    return Math.ceil(String(text || '').length / 4);
+}
+
+function sanitizeReply(reply, { toneCtx, contactProfile, settings }) {
+    let output = String(reply || '').replace(/\r/g, '').trim();
+    output = output.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n');
+    output = output.replace(/([!?.,]){3,}/g, '$1$1');
+
+    const styleGuardEnabled = settings.reply_style_guard !== 'false';
+    const wittyAllowed = Number(contactProfile?.witty_allowed || 0) === 1;
+
+    if (styleGuardEnabled && !wittyAllowed && toneCtx !== 'banter') {
+        output = output.replace(/^(lol|lmao|haha|hehe|omor|bro|bruh|ngl|fr)\b[\s,!.-]*/i, '');
+        output = output.replace(/\b(lol|lmao|haha|hehe)\b/gi, '');
+        output = output.replace(/\s{2,}/g, ' ').trim();
+
+        const sentences = output.match(/[^.!?]+[.!?]?/g) || [output];
+        if (sentences.length > 2) {
+            output = sentences.slice(0, 2).join(' ').trim();
+        }
+    }
+
+    return output;
+}
+
 /**
  * @param {object} ctx
  * @param {string} ctx.jid
@@ -157,10 +183,26 @@ async function routeAndReply(ctx) {
             memories: ctx.memories,
             toneCtx,
             model,
+            contactProfile: ctx.contactProfile,
         });
 
         try {
-            const reply = await callProvider(model, systemPrompt, messages, ctx);
+            const rawReply = await callProvider(model, systemPrompt, messages, ctx);
+            const reply = sanitizeReply(rawReply, {
+                toneCtx,
+                contactProfile: ctx.contactProfile,
+                settings,
+            });
+
+            recordLlmUsage({
+                jid: ctx.jid,
+                provider: model,
+                model,
+                estimatedInput: estimateTokens(systemPrompt) + estimateTokens(messages.map((message) => message.content || '').join(' ')),
+                estimatedOutput: estimateTokens(reply),
+                estimatedTotal: estimateTokens(systemPrompt) + estimateTokens(messages.map((message) => message.content || '').join(' ')) + estimateTokens(reply),
+            });
+
             return { reply, llm: model };
         } catch (err) {
             markProviderCooldown(model, err);

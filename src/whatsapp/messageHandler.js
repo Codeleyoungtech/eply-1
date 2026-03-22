@@ -18,7 +18,7 @@ const { getConversationContext } = require('../engine/contextManager');
 const { extractAndStore, getContactMemories } = require('../engine/memoryManager');
 const { resetFollowUp } = require('../engine/urgencyDetector');
 const { sendUrgentPing } = require('../engine/notifier');
-const { saveMessage, flagMessage, getSetting } = require('../db/queries');
+const { saveMessage, flagMessage, getSetting, getTodayLlmUsage, getContactProfile } = require('../db/queries');
 const { sendMessage, getClient } = require('./connection');
 const { logger } = require('../logger');
 
@@ -89,6 +89,16 @@ function extractName(msg) {
     return msg.pushName || msg.key?.remoteJid?.split('@')[0] || 'Unknown';
 }
 
+function extractSenderJid(msg) {
+    return jidNormalizedUser(
+        msg?.key?.participant ||
+        msg?.participant ||
+        msg?.message?.extendedTextMessage?.contextInfo?.participant ||
+        msg?.key?.remoteJid ||
+        ''
+    );
+}
+
 function isMentioned(msg, meJid, adminNumber) {
     const body = extractText(msg) || '';
     const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
@@ -139,6 +149,21 @@ function normalizeIncomingText(text) {
     return text.replace(/\s+/g, ' ').trim().slice(0, 600);
 }
 
+function estimateTokens(text = '') {
+    return Math.ceil(String(text || '').length / 4);
+}
+
+function estimateRequestTokens({ incomingText, history = [], historySummary = '', memories = [] }) {
+    const historyText = history.map((message) => message.content || '').join(' ');
+    const memoryText = memories.map((memory) => memory.fact || '').join(' ');
+    return estimateTokens(`${incomingText || ''} ${historyText} ${historySummary || ''} ${memoryText}`) + 400;
+}
+
+function getBudgetFallbackReply(isGroup) {
+    if (isGroup) return null;
+    return 'A bit tied up right now. I will get back to you shortly.';
+}
+
 async function sendReplyChunks(jid, text) {
     const chunks = String(text || '')
         .split(/\n+/)
@@ -175,14 +200,22 @@ async function handleMessage(msg) {
         const allowSelfChat = process.env.ALLOW_SELF_CHAT_AI === 'true';
 
         const isGroup = jid.endsWith('@g.us');
+        const senderJid = extractSenderJid(msg);
+        const senderPhone = senderJid.replace(/[^0-9]/g, '');
         const text = extractText(msg);
         const mediaType = extractMediaType(msg);
         const contactName = extractName(msg);
         const adminNumber = process.env.ADMIN_NUMBER || '';
-        const isAdmin = adminNumber && jid.startsWith(adminNumber);
+        const isAdmin = adminNumber && senderPhone.startsWith(adminNumber);
+        const contactProfile = getContactProfile(jid);
 
         if (isSelfChat && !allowSelfChat) {
             logger.debug('Ignoring self-chat AI message', { jid });
+            return;
+        }
+
+        if (contactProfile?.muted) {
+            logger.info('Muted contact/thread — silencing reply', { jid });
             return;
         }
 
@@ -218,14 +251,18 @@ async function handleMessage(msg) {
         logger.info('▶ Message received', {
             from: contactName,
             jid,
+            senderJid,
             isSelfChat,
             isGroup,
             preview: (text || `[${mediaType}]` || '(empty)').slice(0, 80),
         });
 
         // ── Save incoming message to DB ────────────────────────────────────────
+        const storeGroupMessages = getSetting('store_group_messages') === 'true';
         if (text || mediaType) {
+            if (!isGroup || storeGroupMessages) {
             saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
+            }
         }
 
         // ── Extract memory facts ───────────────────────────────────────────────
@@ -246,7 +283,7 @@ async function handleMessage(msg) {
         const replyToMe = isGroup ? isReplyToMe(msg, myJid) : false;
 
         const rule = applyReplyRules({
-            jid, phone: jid.replace(/[^0-9]/g, ''), text, isGroup,
+            jid, phone: senderPhone, senderJid, text, isGroup,
             mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true,
         });
 
@@ -284,10 +321,37 @@ async function handleMessage(msg) {
         });
         const history = trimHistoryForLlm(context.recent);
         const memories = trimMemoriesForLlm(getContactMemories(jid));
+        const todayUsage = getTodayLlmUsage() || {};
+        const dailyReplyLimit = Number(getSetting('daily_reply_limit') || 80);
+        const dailyTokenLimit = Number(getSetting('daily_estimated_token_limit') || 12000);
+        const estimatedRequestTokens = estimateRequestTokens({
+            incomingText: normalizeIncomingText(text),
+            history,
+            historySummary: context.summary,
+            memories,
+        });
+
+        if (
+            (Number.isFinite(dailyReplyLimit) && dailyReplyLimit > 0 && Number(todayUsage.calls || 0) >= dailyReplyLimit) ||
+            (Number.isFinite(dailyTokenLimit) && dailyTokenLimit > 0 && (Number(todayUsage.estimated_total || 0) + estimatedRequestTokens) >= dailyTokenLimit)
+        ) {
+            const fallbackReply = getBudgetFallbackReply(isGroup);
+            logger.warn('Daily LLM budget reached — suppressing model call', {
+                jid,
+                estimatedRequestTokens,
+                todayCalls: todayUsage.calls || 0,
+                todayEstimatedTokens: todayUsage.estimated_total || 0,
+            });
+            if (fallbackReply) {
+                await sendReplyChunks(jid, fallbackReply);
+                saveMessage({ jid, contactName, direction: 'out', content: fallbackReply, llmUsed: null, isGroup });
+            }
+            return;
+        }
 
         const { reply, llm } = await routeAndReply({
             jid, contactName, incomingText: normalizeIncomingText(text), mediaType,
-            mediaBuffer: null, history, historySummary: context.summary, memories, isGroup,
+            mediaBuffer: null, history, historySummary: context.summary, memories, isGroup, contactProfile,
         });
 
         if (!reply) {

@@ -36,8 +36,8 @@ const GM_PATTERNS = [
  * @param {boolean} opts.autoReplyEnabled
  * @returns {object} action
  */
-function applyReplyRules({ jid, phone, text, isGroup, mentionedMe, replyToMe, adminNumber, autoReplyEnabled }) {
-    const vip = isVip(phone);
+function applyReplyRules({ jid, phone, senderJid, text, isGroup, mentionedMe, replyToMe, adminNumber, autoReplyEnabled }) {
+    const vip = isVip(phone, senderJid);
 
     // ── 1. Auto-reply master toggle ────────────────────────────────────────────
     if (!autoReplyEnabled) {

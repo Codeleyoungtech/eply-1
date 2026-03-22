@@ -37,8 +37,8 @@
                                     <form method="POST" action="/vip/add"
                                         style="display:flex;flex-direction:column;gap:12px">
                                         <div class="form-group" style="margin-bottom:0"><label class="form-label">Phone
-                                                Number</label><input class="form-input" name="phone"
-                                                placeholder="27821234567 (digits only, no +)" required /></div>
+                                                Number or JID</label><input class="form-input" name="identifier"
+                                                placeholder="27821234567 or 11768613052461@lid" required /></div>
                                         <div class="form-group" style="margin-bottom:0"><label
                                                 class="form-label">Label</label><input class="form-input" name="label"
                                                 placeholder="Mama, Partner, Best friend…" /></div>
@@ -65,8 +65,8 @@
                                                             <td><strong>
                                                                     <%= v.label || '—' %>
                                                                 </strong></td>
-                                                            <td style="font-family:monospace;color:var(--muted)">+<%=
-                                                                    v.phone %>
+                                                            <td style="font-family:monospace;color:var(--muted)">
+                                                                <%= v.phone.includes('@') ? v.phone : `+${v.phone}` %>
                                                             </td>
                                                             <td>
                                                                 <form method="POST" action="/vip/remove/<%= v.id %>"

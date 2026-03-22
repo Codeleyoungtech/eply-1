@@ -3,16 +3,18 @@
 const express = require('express');
 const router = express.Router();
 const { getStatus } = require('../../whatsapp/connection');
-const { getTodayStats, getSetting, setSetting, getFlagged } = require('../../db/queries');
+const { getTodayStats, getTodayLlmUsage, getSetting, setSetting, getFlagged } = require('../../db/queries');
 
 router.get('/', (req, res) => {
     const stats = getTodayStats() || {};
+    const llmUsage = getTodayLlmUsage() || {};
     const autoReply = getSetting('auto_reply_enabled') !== 'false';
     const flaggedCount = getFlagged(false).length;
     res.render('home', {
         title: 'EPLY — Dashboard',
         waStatus: getStatus(),
         stats,
+        llmUsage,
         autoReply,
         flaggedCount,
     });
