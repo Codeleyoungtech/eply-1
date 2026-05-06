@@ -8,14 +8,13 @@
         "dev": "node --watch index.js"
     },
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=22.12.0"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.39.0",
         "@google/generative-ai": "^0.24.0",
         "@hapi/boom": "^10.0.1",
         "baileys": "6.7.16",
-        "better-sqlite3": "^11.9.1",
         "bullmq": "^5.41.2",
         "connect-sqlite3": "^0.9.13",
         "cors": "^2.8.5",
@@ -39,7 +38,6 @@
     },
     "pnpm": {
         "onlyBuiltDependencies": [
-            "better-sqlite3",
             "msgpackr-extract",
             "protobufjs",
             "sqlite3"

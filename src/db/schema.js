@@ -1,6 +1,13 @@
 'use strict';
 
-const Database = require('better-sqlite3');
+/**
+ * Database layer — uses Node.js built-in `node:sqlite` (DatabaseSync).
+ * Available unflagged from Node 22.12.0+.
+ * Zero native compilation — no better-sqlite3, no node-gyp, no Python.
+ * API is identical to better-sqlite3: .prepare().get() / .all() / .run()
+ */
+
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const { logger } = require('../logger');
@@ -13,7 +20,7 @@ function getDb() {
 }
 
 function initDb() {
-    const dbPath = process.env.DB_PATH || '/data/eply.db';
+    const dbPath = process.env.DB_PATH || './eply.db';
 
     // Ensure parent directory exists (e.g. /data on Railway)
     const dir = path.dirname(dbPath);
@@ -21,9 +28,11 @@ function initDb() {
         fs.mkdirSync(dir, { recursive: true });
     }
 
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    db = new DatabaseSync(dbPath);
+
+    // WAL mode = faster writes, safe concurrent reads
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA foreign_keys = ON');
 
     db.exec(`
     -- ── Identity Profile ───────────────────────────────────────────────────
@@ -62,12 +71,12 @@ function initDb() {
     -- ── Messages (every message in/out) ─────────────────────────────────────
     CREATE TABLE IF NOT EXISTS messages (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      jid         TEXT NOT NULL,        -- chat JID (phone@s.whatsapp.net or group@g.us)
+      jid         TEXT NOT NULL,
       contact_name TEXT,
-      direction   TEXT NOT NULL,        -- 'in' | 'out'
+      direction   TEXT NOT NULL,
       content     TEXT,
-      media_type  TEXT,                 -- null | 'image' | 'audio' | 'document' | 'video'
-      llm_used    TEXT,                 -- 'groq' | 'gemini' | 'claude' | null
+      media_type  TEXT,
+      llm_used    TEXT,
       is_group    INTEGER DEFAULT 0,
       timestamp   INTEGER DEFAULT (strftime('%s', 'now'))
     );
@@ -90,7 +99,7 @@ function initDb() {
     CREATE TABLE IF NOT EXISTS digests (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       content     TEXT NOT NULL,
-      stats       TEXT,                 -- JSON blob
+      stats       TEXT,
       delivered   INTEGER DEFAULT 0,
       created_at  INTEGER DEFAULT (strftime('%s', 'now'))
     );
@@ -135,7 +144,7 @@ function initDb() {
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       name        TEXT NOT NULL,
       cron_expr   TEXT,
-      payload     TEXT,                 -- JSON
+      payload     TEXT,
       enabled     INTEGER DEFAULT 1,
       last_run    INTEGER,
       created_at  INTEGER DEFAULT (strftime('%s', 'now'))
