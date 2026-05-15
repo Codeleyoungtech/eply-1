@@ -38,7 +38,9 @@ const COMMANDS = new Map([
     ['!catchup', handleCatchup],
     ['!todo', handleTodo],
     ['!tasks', handleTodo],
+    ['!task', handleTodo],
     ['!decisions', handleDecisions],
+    ['!decision', handleDecisions],
     ['!ask', handleAsk],
     ['!remember', handleRemember],
     ['!recall', handleRecall],
@@ -51,6 +53,7 @@ const COMMANDS = new Map([
     ['!unmute', handleUnmute],
     ['!groupmode', handleGroupMode],
     ['!storegroups', handleStoreGroups],
+    ['!storegroup', handleStoreGroups],
 ]);
 
 function isCommand(text) {
@@ -93,8 +96,8 @@ function handleMenu() {
         'Voice notes — transcribe and reply automatically',
         '`!summary` / `!recap` — summarize recent chat',
         '`!catchup` — show what needs attention',
-        '`!todo` — extract tasks from recent chat',
-        '`!decisions` — extract decisions/open questions',
+        '`!todo` / `!task` — extract tasks from recent chat',
+        '`!decisions` / `!decision` — extract decisions/open questions',
         '',
         '*Text Tools*',
         '`!ask <question>` — quick answer',
