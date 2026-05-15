@@ -49,14 +49,18 @@ EPLY can stay quiet in group chats until it is needed.
 
 | Trigger / Command | Description |
 |-------------------|-------------|
+| `!menu` | Show the command menu |
 | Tag your WhatsApp number | EPLY replies in the group when mentioned |
 | Reply to one of your messages | EPLY can respond inside that group thread |
+| Voice note | EPLY transcribes it, stores the transcript, and replies normally |
 | `!summary` or `!recap` | Summarize recent group messages |
 | `!catchup` | Explain what you missed and what needs attention |
 | `!todo` / `!tasks` | Extract action items from recent chat |
 | `!decisions` | Extract decisions and open questions |
 | `!summary 80` | Summarize up to 80 recent stored messages |
 | `!ask <question>` | Ask a private utility question from WhatsApp |
+| `!remember <fact>` | Save something to private memory |
+| `!recall <query>` | Search private memory |
 | `!rewrite <text>` | Rewrite text |
 | `!polish <text>` | Clean up text |
 | `!translate <lang> <text>` | Translate text |

@@ -11,11 +11,13 @@
  */
 
 const { jidNormalizedUser, getContentType } = require('baileys');
+const { downloadMediaMessage } = require('baileys');
 const { isCommand, runCommand } = require('../engine/commands');
 const { applyReplyRules } = require('../engine/replyRules');
 const { routeAndReply } = require('../engine/llmRouter');
 const { getConversationContext } = require('../engine/contextManager');
 const { extractAndStore, getContactMemories } = require('../engine/memoryManager');
+const { getAudioMimeType, transcribeVoiceNote } = require('../engine/audioTools');
 const { resetFollowUp } = require('../engine/urgencyDetector');
 const { sendUrgentPing } = require('../engine/notifier');
 const { saveMessage, flagMessage, getSetting, getTodayLlmUsage, getContactProfile } = require('../db/queries');
@@ -192,6 +194,18 @@ async function sendReplyChunks(jid, text) {
     }
 }
 
+async function downloadMediaBuffer(msg, sock) {
+    return downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        {
+            logger,
+            reuploadRequest: sock?.updateMediaMessage?.bind(sock),
+        }
+    );
+}
+
 // ── Master handler ────────────────────────────────────────────────────────────
 
 async function handleMessage(msg) {
@@ -216,7 +230,7 @@ async function handleMessage(msg) {
         const isGroup = jid.endsWith('@g.us');
         const senderJid = extractSenderJid(msg);
         const senderPhone = senderJid.replace(/[^0-9]/g, '');
-        const text = extractText(msg);
+        let text = extractText(msg);
         const mediaType = extractMediaType(msg);
         const contactName = extractName(msg);
         const adminNumber = process.env.ADMIN_NUMBER || '';
@@ -231,6 +245,24 @@ async function handleMessage(msg) {
         if (!text && !mediaType) {
             logger.debug('Ignoring non-content message', { jid, isGroup, isSelfChat });
             return;
+        }
+
+        if (mediaType === 'audio' && !text) {
+            try {
+                const audioBuffer = await downloadMediaBuffer(msg, sock);
+                const mimeType = getAudioMimeType(msg);
+                const { transcript, provider } = await transcribeVoiceNote({ jid, audioBuffer, mimeType });
+                text = transcript;
+                logger.info('Voice note transcribed', {
+                    jid,
+                    provider,
+                    chars: transcript.length,
+                    preview: transcript.slice(0, 100),
+                });
+            } catch (err) {
+                logger.warn('Voice note transcription failed — suppressing reply', { jid, err: err.message });
+                return;
+            }
         }
 
         if (mediaType && !text) {

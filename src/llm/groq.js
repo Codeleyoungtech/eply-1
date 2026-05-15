@@ -6,6 +6,7 @@
  */
 
 const Groq = require('groq-sdk');
+const { toFile } = require('groq-sdk');
 const { logger } = require('../logger');
 
 let groqClient;
@@ -41,4 +42,18 @@ async function callGroq(systemPrompt, messages) {
     return reply;
 }
 
-module.exports = { callGroq };
+async function transcribeGroqAudio(audioBuffer, { filename = 'voice-note.ogg', language } = {}) {
+    const client = getGroqClient();
+    const response = await client.audio.transcriptions.create({
+        file: await toFile(audioBuffer, filename),
+        model: process.env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3',
+        language: language || process.env.TRANSCRIBE_LANGUAGE || undefined,
+    });
+
+    const text = response.text?.trim();
+    if (!text) throw new Error('Groq returned empty transcription');
+    logger.debug('Groq audio transcribed', { chars: text.length });
+    return text;
+}
+
+module.exports = { callGroq, transcribeGroqAudio };

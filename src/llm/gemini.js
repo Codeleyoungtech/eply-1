@@ -69,4 +69,30 @@ async function callGemini(systemPrompt, messages, mediaBuffer = null, mediaType 
     return reply;
 }
 
-module.exports = { callGemini };
+async function transcribeGeminiAudio(audioBuffer, { mimeType = 'audio/ogg' } = {}) {
+    const genAIClient = getGenAI();
+    const model = genAIClient.getGenerativeModel({
+        model: process.env.GEMINI_TRANSCRIBE_MODEL || 'gemini-2.0-flash',
+        generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 700,
+        },
+    });
+
+    const result = await model.generateContent([
+        {
+            inlineData: {
+                mimeType,
+                data: audioBuffer.toString('base64'),
+            },
+        },
+        { text: 'Transcribe this WhatsApp voice note accurately. Return only the transcript text.' },
+    ]);
+
+    const text = result.response.text()?.trim();
+    if (!text) throw new Error('Gemini returned empty transcription');
+    logger.debug('Gemini audio transcribed', { chars: text.length });
+    return text;
+}
+
+module.exports = { callGemini, transcribeGeminiAudio };

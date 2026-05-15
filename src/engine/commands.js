@@ -8,6 +8,7 @@
  * Commands:
  *   !ping        — latency test
  *   !help        — list all commands
+ *   !menu        — categorized command menu
  *   !status      — bot status
  *   !id          — show your JID (useful for config)
  *   !off         — disable auto-reply (only for admin)
@@ -25,6 +26,8 @@ const COMMANDS = new Map([
     ['!ping',   handlePing],
     ['ping',    handlePing],
     ['!help',   handleHelp],
+    ['!menu',   handleMenu],
+    ['menu',    handleMenu],
     ['!status', handleStatus],
     ['!id',     handleId],
     ['!on',     handleOn],
@@ -37,6 +40,9 @@ const COMMANDS = new Map([
     ['!tasks', handleTodo],
     ['!decisions', handleDecisions],
     ['!ask', handleAsk],
+    ['!remember', handleRemember],
+    ['!recall', handleRecall],
+    ['!find', handleRecall],
     ['!rewrite', handleRewrite],
     ['!polish', handlePolish],
     ['!translate', handleTranslate],
@@ -69,29 +75,45 @@ function handlePing({ jid }) {
 }
 
 function handleHelp() {
+    return handleMenu();
+}
+
+function handleMenu() {
     return [
-        '⚡ *EPLY Commands*',
+        '⚡ *EPLY Menu*',
         '',
-        '`!ping`   — check if the bot is alive',
-        '`!status` — show current bot status',
-        '`!id`     — show your WhatsApp ID',
-        '`!on`     — enable auto-replies (admin only)',
-        '`!off`    — disable auto-replies (admin only)',
+        '*Core*',
+        '`!status` — bot status',
+        '`!ping` — check if alive',
+        '`!id` — show this chat ID',
         '`!whoami` — show admin number',
+        '`!on` / `!off` — auto-reply switch',
+        '',
+        '*Chat Intelligence*',
+        'Voice notes — transcribe and reply automatically',
         '`!summary` / `!recap` — summarize recent chat',
         '`!catchup` — show what needs attention',
         '`!todo` — extract tasks from recent chat',
         '`!decisions` — extract decisions/open questions',
-        '`!ask <question>` — private utility answer',
+        '',
+        '*Text Tools*',
+        '`!ask <question>` — quick answer',
+        '`!remember <fact>` — save private memory',
+        '`!recall <query>` — search private memory',
         '`!rewrite <text>` — rewrite text',
         '`!polish <text>` — clean up text',
         '`!translate <lang> <text>` — translate text',
         '`!shorten <text>` — make text shorter',
+        '',
+        '*Control*',
         '`!mute` / `!unmute` — silence or allow this chat',
         '`!groupmode on|off` — toggle group features (admin only)',
         '`!storegroups on|off` — store group messages for summaries (admin only)',
         '',
-        '_EPLY — your AI self on WhatsApp 🤖_',
+        '*Group Trigger*',
+        'Tag your number or type `@eply` in a group.',
+        '',
+        '_EPLY — your AI self on WhatsApp_',
     ].join('\n');
 }
 
@@ -203,6 +225,35 @@ function handleStoreGroups({ text, isAdmin }) {
 async function handleAsk({ text, jid, isAdmin }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
     return await runTextTool({ jid, text, tool: 'ask' }) || 'Usage: `!ask your question`';
+}
+
+function stripCommandText(text) {
+    return String(text || '').replace(/^!\w+\s*/i, '').trim();
+}
+
+function handleRemember({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can save private memory.';
+    const fact = stripCommandText(text);
+    if (!fact) return 'Usage: `!remember the thing you want me to keep`';
+    db.saveFact({
+        jid: 'private-brain',
+        contactName: 'Private Brain',
+        fact,
+        sourceMsg: `Saved from ${jid}`,
+    });
+    return 'Saved to private memory.';
+}
+
+function handleRecall({ text, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can search private memory.';
+    const query = stripCommandText(text);
+    if (!query) return 'Usage: `!recall what you want to find`';
+    const rows = db.searchMemories(query, 6);
+    if (!rows.length) return 'No matching memory found.';
+    return [
+        '*Memory matches*',
+        ...rows.map((row, index) => `${index + 1}. ${row.fact}`),
+    ].join('\n');
 }
 
 async function handleRewrite({ text, jid, isAdmin }) {

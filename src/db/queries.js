@@ -185,6 +185,16 @@ function getAllMemories() {
     return getDb().prepare('SELECT * FROM memory ORDER BY created_at DESC').all();
 }
 
+function searchMemories(query, limit = 8) {
+    const term = String(query || '').trim();
+    if (!term) return [];
+    return getDb()
+        .prepare(`SELECT * FROM memory
+              WHERE fact LIKE ? OR source_msg LIKE ? OR contact_name LIKE ?
+              ORDER BY created_at DESC LIMIT ?`)
+        .all(`%${term}%`, `%${term}%`, `%${term}%`, limit);
+}
+
 function deleteFact(id) {
     return getDb().prepare('DELETE FROM memory WHERE id = ?').run(id);
 }
@@ -279,7 +289,7 @@ module.exports = {
     recordLlmUsage, getTodayLlmUsage,
     flagMessage, getFlagged, markHandled,
     saveDigest, getDigests, markDigestDelivered,
-    saveFact, getMemories, getAllMemories, deleteFact, updateFact,
+    saveFact, getMemories, getAllMemories, searchMemories, deleteFact, updateFact,
     getContactProfile, saveContactProfile,
     getSetting, setSetting, getAllSettings,
     getJobs, createJob, deleteJob, touchJob,
