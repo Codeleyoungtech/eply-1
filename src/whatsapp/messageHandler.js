@@ -423,7 +423,7 @@ async function handleMessage(msg) {
         const isAdmin = msg.key.fromMe || (adminNumber && senderPhone.startsWith(adminNumber));
         const contactProfile = getContactProfile(jid);
 
-        if (isSelfChat && !allowSelfChat) {
+        if (isSelfChat && !allowSelfChat && !(text && isCommand(text))) {
             logger.debug('Ignoring self-chat AI message', { jid });
             return;
         }
