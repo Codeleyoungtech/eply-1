@@ -142,6 +142,12 @@ function isReplyToMe(msg, meJid) {
     return jidNormalizedUser(quotedParticipant) === jidNormalizedUser(meJid);
 }
 
+function extractQuotedText(msg) {
+    const quoted = extractContextInfo(msg)?.quotedMessage;
+    if (!quoted) return null;
+    return extractText({ message: quoted });
+}
+
 function trimHistoryForLlm(history = [], maxMessages = 8, maxCharsPerMessage = 220) {
     return history.slice(-maxMessages).map((message) => ({
         ...message,
@@ -180,7 +186,77 @@ function getBudgetFallbackReply(isGroup) {
     return 'A bit tied up right now. I will get back to you shortly.';
 }
 
-async function sendReplyChunks(jid, text) {
+const pendingReplies = new Map();
+
+function getDebounceMs(isGroup) {
+    const raw = isGroup
+        ? (process.env.GROUP_REPLY_DEBOUNCE_MS || process.env.REPLY_DEBOUNCE_MS || '5000')
+        : (process.env.REPLY_DEBOUNCE_MS || '7000');
+    const ms = Number(raw);
+    if (!Number.isFinite(ms) || ms < 0) return 0;
+    return Math.min(ms, 30000);
+}
+
+function buildBatchedText(items) {
+    const texts = items
+        .map((item) => item.text)
+        .filter(Boolean);
+
+    if (texts.length <= 1) return texts[0] || '';
+
+    return texts
+        .map((text, index) => `Message ${index + 1}: ${text}`)
+        .join('\n');
+}
+
+function mergePendingItems(items) {
+    const last = items[items.length - 1];
+    const quotedItem = [...items].reverse().find((item) => item.quotedText);
+    return {
+        ...last,
+        text: buildBatchedText(items),
+        mediaType: last.mediaType || items.find((item) => item.mediaType)?.mediaType || null,
+        quotedText: quotedItem?.quotedText || null,
+        mentionedMe: items.some((item) => item.mentionedMe),
+        replyToMe: items.some((item) => item.replyToMe),
+        batchSize: items.length,
+    };
+}
+
+function scheduleReply(prepared) {
+    const delay = getDebounceMs(prepared.isGroup);
+    if (delay === 0) {
+        return processPreparedReply(prepared);
+    }
+
+    const key = `${prepared.jid}:${prepared.senderJid || 'unknown'}`;
+    const existing = pendingReplies.get(key);
+    const items = existing ? [...existing.items, prepared] : [prepared];
+
+    if (existing?.timer) clearTimeout(existing.timer);
+
+    const timer = setTimeout(async () => {
+        try {
+            pendingReplies.delete(key);
+            const merged = mergePendingItems(items);
+            if (merged.batchSize > 1) {
+                logger.info('Debounced rapid messages into one reply', {
+                    jid: merged.jid,
+                    senderJid: merged.senderJid,
+                    count: merged.batchSize,
+                });
+            }
+            await processPreparedReply(merged);
+        } catch (err) {
+            logger.error('Debounced reply failed', { err: err.message, stack: err.stack?.split('\n')[1] });
+        }
+    }, delay);
+
+    pendingReplies.set(key, { timer, items });
+    logger.debug('Reply debounce scheduled', { jid: prepared.jid, delay, count: items.length });
+}
+
+async function sendReplyChunks(jid, text, quotedMsg = null) {
     const chunks = String(text || '')
         .split(/\n+/)
         .map((chunk) => chunk.trim())
@@ -189,8 +265,8 @@ async function sendReplyChunks(jid, text) {
 
     if (!chunks.length) return;
 
-    for (const chunk of chunks) {
-        await sendMessage(jid, chunk);
+    for (const [index, chunk] of chunks.entries()) {
+        await sendMessage(jid, chunk, index === 0 && quotedMsg ? { quoted: quotedMsg } : {});
     }
 }
 
@@ -204,6 +280,115 @@ async function downloadMediaBuffer(msg, sock) {
             reuploadRequest: sock?.updateMediaMessage?.bind(sock),
         }
     );
+}
+
+async function processPreparedReply(prepared) {
+    const {
+        msg, jid, senderJid, senderPhone, text, mediaType, quotedText, contactName,
+        adminNumber, isGroup, contactProfile, groupFeaturesEnabled, mentionedMe,
+        replyToMe,
+    } = prepared;
+
+    const autoReplyEnvOn  = process.env.AUTO_REPLY_ENABLED === 'true';
+    const autoReplyDbOn   = getSetting('auto_reply_enabled') === 'true';
+    const autoReplyEnabled = autoReplyEnvOn || autoReplyDbOn;
+
+    if (!autoReplyEnabled) {
+        logger.info('Auto-reply is OFF — message logged but not replied. Send !on to enable.', { jid });
+        return;
+    }
+
+    const rule = applyReplyRules({
+        jid, phone: senderPhone, senderJid, text, isGroup,
+        mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true,
+        groupFeaturesEnabled,
+        groupMentionReplies: getSetting('group_mention_replies') !== 'false',
+        groupReplyToMeReplies: getSetting('group_reply_to_me_replies') !== 'false',
+    });
+
+    logger.debug('Rule result', { action: rule.action, reason: rule.reason });
+
+    if (rule.action === 'silent') return;
+
+    if (rule.action === 'ping_only') {
+        await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: rule.reason, isVip: rule.isVip });
+        return;
+    }
+
+    if (rule.action === 'vague_flag') {
+        const vagueReply = 'let me check and get back to you shortly';
+        await sendReplyChunks(jid, vagueReply, msg);
+        saveMessage({ jid, contactName, direction: 'out', content: vagueReply, llmUsed: null, isGroup });
+        flagMessage({ jid, contactName, theirMsg: text, eplyReply: vagueReply, reason: rule.reason });
+        return;
+    }
+
+    const hasAnyKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
+    if (!hasAnyKey) {
+        const noKeyMsg = 'EPLY is not fully configured yet. Add at least one working LLM key.';
+        await sendMessage(jid, noKeyMsg, { quoted: msg });
+        logger.warn('No LLM API keys configured — sent placeholder reply');
+        return;
+    }
+
+    const context = getConversationContext(jid, {
+        fullWindow: 12,
+        summaryThreshold: 30,
+        fetchLimit: 80,
+    });
+    const history = trimHistoryForLlm(context.recent);
+    const memories = trimMemoriesForLlm(getContactMemories(jid));
+    const todayUsage = getTodayLlmUsage() || {};
+    const dailyReplyLimit = Number(getSetting('daily_reply_limit') || 80);
+    const dailyTokenLimit = Number(getSetting('daily_estimated_token_limit') || 12000);
+    const estimatedRequestTokens = estimateRequestTokens({
+        incomingText: normalizeIncomingText(text),
+        history,
+        historySummary: context.summary,
+        memories,
+    });
+
+    if (
+        (Number.isFinite(dailyReplyLimit) && dailyReplyLimit > 0 && Number(todayUsage.calls || 0) >= dailyReplyLimit) ||
+        (Number.isFinite(dailyTokenLimit) && dailyTokenLimit > 0 && (Number(todayUsage.estimated_total || 0) + estimatedRequestTokens) >= dailyTokenLimit)
+    ) {
+        const fallbackReply = getBudgetFallbackReply(isGroup);
+        logger.warn('Daily LLM budget reached — suppressing model call', {
+            jid,
+            estimatedRequestTokens,
+            todayCalls: todayUsage.calls || 0,
+            todayEstimatedTokens: todayUsage.estimated_total || 0,
+        });
+        if (fallbackReply) {
+            await sendReplyChunks(jid, fallbackReply, msg);
+            saveMessage({ jid, contactName, direction: 'out', content: fallbackReply, llmUsed: null, isGroup });
+        }
+        return;
+    }
+
+    const incomingText = quotedText
+        ? `Replying to this message: "${normalizeIncomingText(quotedText)}"\nTheir new message: ${normalizeIncomingText(text)}`
+        : normalizeIncomingText(text);
+
+    const { reply, llm } = await routeAndReply({
+        jid, contactName, incomingText, mediaType,
+        mediaBuffer: null, history, historySummary: context.summary, memories, isGroup, contactProfile,
+    });
+
+    if (!reply) {
+        logger.warn('No reply generated — suppressing send', { jid, llm });
+        return;
+    }
+
+    if (rule.urgency?.urgent) {
+        await sendUrgentPing({ contactName, theirMsg: text, eplyReply: reply, reason: rule.urgency.reason, isVip: false });
+    }
+
+    await sendReplyChunks(jid, reply, msg);
+    resetFollowUp(jid);
+    saveMessage({ jid, contactName, direction: 'out', content: reply, llmUsed: llm, isGroup });
+
+    logger.info('✅ Reply sent', { jid, llm, preview: reply.slice(0, 80) });
 }
 
 // ── Master handler ────────────────────────────────────────────────────────────
@@ -232,6 +417,7 @@ async function handleMessage(msg) {
         const senderPhone = senderJid.replace(/[^0-9]/g, '');
         let text = extractText(msg);
         const mediaType = extractMediaType(msg);
+        const quotedText = extractQuotedText(msg);
         const contactName = extractName(msg);
         const adminNumber = process.env.ADMIN_NUMBER || '';
         const isAdmin = msg.key.fromMe || (adminNumber && senderPhone.startsWith(adminNumber));
@@ -272,7 +458,7 @@ async function handleMessage(msg) {
 
         // ── 1. Built-in commands — ALWAYS work regardless of auto-reply toggle ─
         if (text && isCommand(text)) {
-            const cmdReply = await runCommand({ text, jid, isAdmin, isGroup });
+            const cmdReply = await runCommand({ text, jid, isAdmin, isGroup, quotedText });
             if (cmdReply) {
                 await sendMessage(jid, cmdReply);
                 saveMessage({ jid, contactName, direction: 'out', content: cmdReply, llmUsed: 'builtin', isGroup });
@@ -315,111 +501,16 @@ async function handleMessage(msg) {
         // ── Extract memory facts ───────────────────────────────────────────────
         if (!isGroup && text) extractAndStore(jid, contactName, text);
 
-        // ── 2. Auto-reply master switch ────────────────────────────────────────
-        const autoReplyEnvOn  = process.env.AUTO_REPLY_ENABLED === 'true';
-        const autoReplyDbOn   = getSetting('auto_reply_enabled') === 'true';
-        const autoReplyEnabled = autoReplyEnvOn || autoReplyDbOn;
-
-        if (!autoReplyEnabled) {
-            logger.info('Auto-reply is OFF — message logged but not replied. Send !on to enable.', { jid });
-            return;
-        }
-
-        // ── 3. Reply rules (VIP, group, spam) ─────────────────────────────────
         const mentionedMe = isGroup ? isMentioned(msg, myJid, adminNumber) : false;
         const replyToMe = isGroup ? isReplyToMe(msg, myJid) : false;
 
-        const rule = applyReplyRules({
-            jid, phone: senderPhone, senderJid, text, isGroup,
-            mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true,
+        await scheduleReply({
+            msg, jid, senderJid, senderPhone, text, mediaType, quotedText,
+            contactName, adminNumber, isGroup, contactProfile,
             groupFeaturesEnabled,
-            groupMentionReplies: getSetting('group_mention_replies') !== 'false',
-            groupReplyToMeReplies: getSetting('group_reply_to_me_replies') !== 'false',
+            mentionedMe,
+            replyToMe,
         });
-
-        logger.debug('Rule result', { action: rule.action, reason: rule.reason });
-
-        if (rule.action === 'silent') return;
-
-        if (rule.action === 'ping_only') {
-            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: rule.reason, isVip: rule.isVip });
-            return;
-        }
-
-        if (rule.action === 'vague_flag') {
-            const vagueReply = 'let me check and get back to you shortly';
-            await sendReplyChunks(jid, vagueReply);
-            saveMessage({ jid, contactName, direction: 'out', content: vagueReply, llmUsed: null, isGroup });
-            flagMessage({ jid, contactName, theirMsg: text, eplyReply: vagueReply, reason: rule.reason });
-            return;
-        }
-
-        // ── 4. LLM reply ──────────────────────────────────────────────────────
-        // Check API keys first — helpful error instead of silent failure
-        const hasAnyKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
-        if (!hasAnyKey) {
-            const noKeyMsg = 'EPLY is not fully configured yet. Add at least one working LLM key.';
-            await sendMessage(jid, noKeyMsg);
-            logger.warn('No LLM API keys configured — sent placeholder reply');
-            return;
-        }
-
-        const context = getConversationContext(jid, {
-            fullWindow: 12,
-            summaryThreshold: 30,
-            fetchLimit: 80,
-        });
-        const history = trimHistoryForLlm(context.recent);
-        const memories = trimMemoriesForLlm(getContactMemories(jid));
-        const todayUsage = getTodayLlmUsage() || {};
-        const dailyReplyLimit = Number(getSetting('daily_reply_limit') || 80);
-        const dailyTokenLimit = Number(getSetting('daily_estimated_token_limit') || 12000);
-        const estimatedRequestTokens = estimateRequestTokens({
-            incomingText: normalizeIncomingText(text),
-            history,
-            historySummary: context.summary,
-            memories,
-        });
-
-        if (
-            (Number.isFinite(dailyReplyLimit) && dailyReplyLimit > 0 && Number(todayUsage.calls || 0) >= dailyReplyLimit) ||
-            (Number.isFinite(dailyTokenLimit) && dailyTokenLimit > 0 && (Number(todayUsage.estimated_total || 0) + estimatedRequestTokens) >= dailyTokenLimit)
-        ) {
-            const fallbackReply = getBudgetFallbackReply(isGroup);
-            logger.warn('Daily LLM budget reached — suppressing model call', {
-                jid,
-                estimatedRequestTokens,
-                todayCalls: todayUsage.calls || 0,
-                todayEstimatedTokens: todayUsage.estimated_total || 0,
-            });
-            if (fallbackReply) {
-                await sendReplyChunks(jid, fallbackReply);
-                saveMessage({ jid, contactName, direction: 'out', content: fallbackReply, llmUsed: null, isGroup });
-            }
-            return;
-        }
-
-        const { reply, llm } = await routeAndReply({
-            jid, contactName, incomingText: normalizeIncomingText(text), mediaType,
-            mediaBuffer: null, history, historySummary: context.summary, memories, isGroup, contactProfile,
-        });
-
-        if (!reply) {
-            logger.warn('No reply generated — suppressing send', { jid, llm });
-            return;
-        }
-
-        // ── Urgency check ──────────────────────────────────────────────────────
-        if (rule.urgency?.urgent) {
-            await sendUrgentPing({ contactName, theirMsg: text, eplyReply: reply, reason: rule.urgency.reason, isVip: false });
-        }
-
-        // ── Send reply ────────────────────────────────────────────────────────
-        await sendReplyChunks(jid, reply);
-        resetFollowUp(jid);
-        saveMessage({ jid, contactName, direction: 'out', content: reply, llmUsed: llm, isGroup });
-
-        logger.info('✅ Reply sent', { jid, llm, preview: reply.slice(0, 80) });
 
     } catch (err) {
         logger.error('Message handler crashed', { err: err.message, stack: err.stack?.split('\n')[1] });

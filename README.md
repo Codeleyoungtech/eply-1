@@ -71,6 +71,8 @@ EPLY can stay quiet in group chats until it is needed.
 
 Group replies trigger when your WhatsApp number is tagged or when the message contains `@eply`. You can change the alias with `EPLY_TRIGGER_NAME`. Group summaries, catch-up, tasks, and decisions require `store_group_messages=true` because EPLY needs saved group history to analyze. Mention replies do not require group history storage.
 
+EPLY batches rapid-fire messages before replying. Set `REPLY_DEBOUNCE_MS` and `GROUP_REPLY_DEBOUNCE_MS` to tune how long it waits before producing one combined response. Commands still run instantly.
+
 ## Deploy on Railway
 
 1. Push to a **private** GitHub repo (`.env` must be in `.gitignore`)

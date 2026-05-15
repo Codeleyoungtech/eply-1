@@ -160,9 +160,9 @@ async function connectToWhatsApp() {
  * Send a text message via the active WhatsApp socket.
  * Tracks the sent message ID to prevent the bot from replying to itself.
  */
-async function sendMessage(jid, text) {
+async function sendMessage(jid, text, opts = {}) {
     if (!sock) throw new Error('WhatsApp not connected');
-    const result = await sock.sendMessage(jid, { text });
+    const result = await sock.sendMessage(jid, { text }, opts.quoted ? { quoted: opts.quoted } : undefined);
     const msgId = result?.key?.id;
     if (msgId) {
         sentMessageIds.add(msgId);

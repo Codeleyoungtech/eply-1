@@ -59,12 +59,12 @@ function isCommand(text) {
     return COMMANDS.has(first);
 }
 
-async function runCommand({ text, jid, isAdmin, isGroup }) {
+async function runCommand({ text, jid, isAdmin, isGroup, quotedText }) {
     const first = text.trim().toLowerCase().split(/\s+/)[0];
     const handler = COMMANDS.get(first);
     if (!handler) return null;
     logger.info('Built-in command triggered', { cmd: first, jid });
-    return handler({ text, jid, isAdmin, isGroup });
+    return handler({ text, jid, isAdmin, isGroup, quotedText });
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -222,18 +222,19 @@ function handleStoreGroups({ text, isAdmin }) {
         : '🔴 Group message storage disabled.';
 }
 
-async function handleAsk({ text, jid, isAdmin }) {
+async function handleAsk({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
-    return await runTextTool({ jid, text, tool: 'ask' }) || 'Usage: `!ask your question`';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'ask' }) || 'Usage: `!ask your question` or reply `!ask what does this mean?` to a message';
 }
 
-function stripCommandText(text) {
-    return String(text || '').replace(/^!\w+\s*/i, '').trim();
+function stripCommandText(text, quotedText = '') {
+    const direct = String(text || '').replace(/^!\w+\s*/i, '').trim();
+    return direct || String(quotedText || '').trim();
 }
 
-function handleRemember({ text, jid, isAdmin }) {
+function handleRemember({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can save private memory.';
-    const fact = stripCommandText(text);
+    const fact = stripCommandText(text, quotedText);
     if (!fact) return 'Usage: `!remember the thing you want me to keep`';
     db.saveFact({
         jid: 'private-brain',
@@ -244,9 +245,9 @@ function handleRemember({ text, jid, isAdmin }) {
     return 'Saved to private memory.';
 }
 
-function handleRecall({ text, isAdmin }) {
+function handleRecall({ text, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can search private memory.';
-    const query = stripCommandText(text);
+    const query = stripCommandText(text, quotedText);
     if (!query) return 'Usage: `!recall what you want to find`';
     const rows = db.searchMemories(query, 6);
     if (!rows.length) return 'No matching memory found.';
@@ -256,24 +257,32 @@ function handleRecall({ text, isAdmin }) {
     ].join('\n');
 }
 
-async function handleRewrite({ text, jid, isAdmin }) {
-    if (!isAdmin) return '❌ Only the admin can use utility tools.';
-    return await runTextTool({ jid, text, tool: 'rewrite' }) || 'Usage: `!rewrite your text`';
+function textWithQuotedFallback(text, quotedText) {
+    const command = String(text || '').split(/\s+/)[0] || '';
+    const payload = stripCommandText(text);
+    if (payload) return text;
+    if (!quotedText) return text;
+    return `${command} ${quotedText}`;
 }
 
-async function handlePolish({ text, jid, isAdmin }) {
+async function handleRewrite({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
-    return await runTextTool({ jid, text, tool: 'polish' }) || 'Usage: `!polish your text`';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'rewrite' }) || 'Usage: `!rewrite your text` or reply `!rewrite` to a message';
 }
 
-async function handleTranslate({ text, jid, isAdmin }) {
+async function handlePolish({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
-    return await runTextTool({ jid, text, tool: 'translate' }) || 'Usage: `!translate French your text`';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'polish' }) || 'Usage: `!polish your text` or reply `!polish` to a message';
 }
 
-async function handleShorten({ text, jid, isAdmin }) {
+async function handleTranslate({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
-    return await runTextTool({ jid, text, tool: 'short' }) || 'Usage: `!shorten your text`';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'translate' }) || 'Usage: `!translate French your text` or reply `!translate French` to a message';
+}
+
+async function handleShorten({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'short' }) || 'Usage: `!shorten your text` or reply `!shorten` to a message';
 }
 
 function handleMute({ jid, isAdmin }) {
