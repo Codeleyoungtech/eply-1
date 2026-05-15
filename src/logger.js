@@ -3,6 +3,7 @@
 const { createLogger, format, transports } = require('winston');
 const path = require('path');
 const { EventEmitter } = require('events');
+const { ensureDir, getLogDir } = require('./config/paths');
 
 // SSE emitter — dashboard /logs/stream subscribes to this
 const logEmitter = new EventEmitter();
@@ -49,15 +50,16 @@ const logger = createLogger({
 
 // In production we also write to files
 if (process.env.NODE_ENV === 'production') {
+    const logDir = ensureDir(getLogDir());
     logger.add(
         new transports.File({
-            filename: path.join(process.cwd(), 'logs', 'error.log'),
+            filename: path.join(logDir, 'error.log'),
             level: 'error',
         })
     );
     logger.add(
         new transports.File({
-            filename: path.join(process.cwd(), 'logs', 'combined.log'),
+            filename: path.join(logDir, 'combined.log'),
         })
     );
 }

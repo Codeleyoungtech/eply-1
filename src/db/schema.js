@@ -9,8 +9,8 @@
 
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
-const fs = require('fs');
 const { logger } = require('../logger');
+const { ensureDir, getDbPath } = require('../config/paths');
 
 let db;
 
@@ -20,13 +20,9 @@ function getDb() {
 }
 
 function initDb() {
-    const dbPath = process.env.DB_PATH || './eply.db';
+    const dbPath = getDbPath();
 
-    // Ensure parent directory exists (e.g. /data on Railway)
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
+    ensureDir(path.dirname(dbPath));
 
     db = new DatabaseSync(dbPath);
 

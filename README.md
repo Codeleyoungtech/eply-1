@@ -49,8 +49,19 @@ Then visit `http://localhost:3000/qr` and scan the QR code with WhatsApp.
 2. Railway → New Project → Deploy from GitHub
 3. **Add a Volume** → Mount at `/data` → Size: 1 GB *(critical — do this before first deploy)*
 4. Add Redis service (Railway auto-injects `REDIS_URL`)
-5. Add all env vars from `.env.example` in the Variables tab
+5. Add all env vars from `.env.example` in the Variables tab and set `DATA_DIR=/data`
 6. Deploy → visit `/qr` → scan → done
+
+## Deploy on InterServer / cPanel Node.js
+
+1. Create a Node.js app that runs `node index.js` from this project directory.
+2. Use Node.js 22 or newer. EPLY uses the built-in `node:sqlite` module.
+3. Set environment variables from `.env.example`.
+4. Keep `DATA_DIR=./data` unless InterServer gives you a better persistent path.
+5. Make sure `data/` is writable by the Node.js app user.
+6. Open the app URL, log in, visit `/qr`, and scan the WhatsApp QR.
+
+The SQLite database, WhatsApp auth session, dashboard sessions, and logs are stored under `DATA_DIR` by default, so backups and migrations only need that directory plus your environment variables.
 
 See `EPLY_PRD_v3.md` for full documentation.
 
@@ -58,7 +69,7 @@ See `EPLY_PRD_v3.md` for full documentation.
 - **WhatsApp**: `@whiskeysockets/baileys`
 - **Dashboard**: Express.js + EJS
 - **LLMs**: Groq (Llama 3.3 70B) · Gemini 2.0 Flash · Claude Sonnet
-- **DB**: better-sqlite3 (SQLite)
+- **DB**: Node.js built-in SQLite (`node:sqlite`)
 - **Queue**: BullMQ + Redis
 - **Logging**: Winston + SSE live stream
 - **Deploy**: Railway

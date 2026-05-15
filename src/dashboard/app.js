@@ -2,9 +2,11 @@
 
 const express = require('express');
 const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 const path = require('path');
 const { logger, logEmitter } = require('../logger');
 const { getStatus } = require('../whatsapp/connection');
+const { ensureDir, getSessionDir } = require('../config/paths');
 
 // Routes
 const authRouter = require('./routes/auth');
@@ -23,9 +25,14 @@ const healthRouter = require('./routes/health');
 
 function createApp() {
     const app = express();
+    const isProduction = process.env.NODE_ENV === 'production';
+    const sessionDir = ensureDir(getSessionDir());
 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, 'views'));
+    if (isProduction || process.env.TRUST_PROXY === 'true') {
+        app.set('trust proxy', 1);
+    }
 
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
@@ -33,10 +40,21 @@ function createApp() {
 
     // Session
     app.use(session({
-        secret: process.env.DASHBOARD_PASSWORD || 'eply-session-secret',
+        store: new SQLiteStore({
+            dir: sessionDir,
+            db: 'sessions.sqlite',
+            table: 'sessions',
+        }),
+        secret: process.env.SESSION_SECRET || process.env.DASHBOARD_PASSWORD || 'eply-session-secret',
         resave: false,
         saveUninitialized: false,
-        cookie: { secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 }, // 7 days
+        name: 'eply.sid',
+        cookie: {
+            secure: process.env.COOKIE_SECURE === 'true' ? true : 'auto',
+            httpOnly: true,
+            sameSite: 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        },
     }));
 
     // Make WA status available in all views

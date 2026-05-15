@@ -8,9 +8,9 @@ const {
     jidNormalizedUser,
 } = require('baileys');
 const QRCode = require('qrcode');
-const path = require('path');
 const { logger } = require('../logger');
 const { EventEmitter } = require('events');
+const { getAuthDir } = require('../config/paths');
 
 // ── Silence Baileys / Signal Protocol console.log spam ───────────────────────
 // The libsignal layer inside Baileys prints "Closing session: SessionEntry {...}"
@@ -57,11 +57,11 @@ async function getVersion() {
 const pinoSilent = require('pino')({ level: 'silent' });
 
 async function connectToWhatsApp() {
-    const authDir = process.env.AUTH_DIR || path.join(process.cwd(), 'auth_info_baileys');
+    const authDir = getAuthDir();
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const version = await getVersion(); // cached — no HTTP round-trip on reconnects
 
-    logger.info('Connecting to WhatsApp', { version });
+    logger.info('Connecting to WhatsApp', { version, authDir });
     connectionStatus = 'connecting';
 
     sock = makeWASocket({
@@ -102,8 +102,8 @@ async function connectToWhatsApp() {
                 logger.info(`Reconnecting in ${delay / 1000}s...`);
                 setTimeout(connectToWhatsApp, delay);
             } else {
-                // Logged out — delete auth so next boot shows a fresh QR
-                logger.error('WhatsApp logged out — delete auth_info_baileys/ and restart to re-pair');
+                // Logged out — clear auth so next boot shows a fresh QR
+                logger.error('WhatsApp logged out — clear the auth directory and restart to re-pair', { authDir });
             }
         }
     });

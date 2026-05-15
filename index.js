@@ -1,10 +1,9 @@
 'use strict';
 
 require('dotenv').config();
-const path = require('path');
-const fs = require('fs');
 
 const { logger } = require('./src/logger');
+const { ensureRuntimeDirs, getAuthDir, getDataDir, getDbPath, getLogDir } = require('./src/config/paths');
 const { initDb } = require('./src/db/schema');
 const { createApp } = require('./src/dashboard/app');
 const { connectToWhatsApp, waEmitter } = require('./src/whatsapp/connection');
@@ -17,17 +16,14 @@ async function boot() {
     logger.info('    Responds as you. Sounds like you. Never sleeps.');
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    // ── 1. Ensure /data dir exists (Railway Volume) ────────────────────────
-    const dbPath = process.env.DB_PATH || '/data/eply.db';
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    // Ensure logs dir exists
-    if (!fs.existsSync('logs')) {
-        fs.mkdirSync('logs', { recursive: true });
-    }
+    // ── 1. Ensure writable runtime directories exist ───────────────────────
+    ensureRuntimeDirs();
+    logger.info('Runtime storage ready', {
+        dataDir: getDataDir(),
+        dbPath: getDbPath(),
+        authDir: getAuthDir(),
+        logDir: getLogDir(),
+    });
 
     // ── 2. Init database ───────────────────────────────────────────────────
     initDb();
