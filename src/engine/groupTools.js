@@ -32,7 +32,7 @@ function sanitizeToolReply(reply) {
         .slice(0, 1600);
 }
 
-function parseSummaryLimit(text, fallback) {
+function parseLimit(text, fallback) {
     const match = String(text || '').match(/\b(\d{1,3})\b/);
     const requested = match ? Number(match[1]) : fallback;
     if (!Number.isFinite(requested)) return fallback;
@@ -55,14 +55,16 @@ function formatGroupMessages(messages) {
         .join('\n');
 }
 
-async function summarizeGroup({ jid, text }) {
+async function runThreadTool({ jid, text, tool = 'summary', isGroup = false }) {
     const fallbackLimit = Number(getSetting('group_summary_default_limit') || process.env.GROUP_SUMMARY_DEFAULT_LIMIT || 40);
-    const limit = parseSummaryLimit(text, fallbackLimit);
+    const limit = parseLimit(text, fallbackLimit);
     const messages = getThread(jid, limit);
     const transcript = formatGroupMessages(messages);
 
     if (!transcript) {
-        return 'No stored group messages yet. Turn on group message storage first, then try again after some chat.';
+        return isGroup
+            ? 'No stored group messages yet. Turn on group message storage first, then try again after some chat.'
+            : 'No stored messages in this chat yet.';
     }
 
     const providers = getAvailableProviders();
@@ -70,22 +72,53 @@ async function summarizeGroup({ jid, text }) {
         return 'No LLM key is configured yet, so I cannot summarize this group right now.';
     }
 
+    const toolInstructions = {
+        summary: [
+            'Return a useful recap.',
+            'Use this structure:',
+            'Recap:',
+            '- Main points',
+            '- Decisions or requests',
+            '- Things the owner may need to reply to',
+            'Keep it under 10 short lines.',
+        ],
+        todo: [
+            'Extract action items, tasks, promises, follow-ups, deadlines, and owners.',
+            'Use this structure:',
+            'Tasks:',
+            '- Task - owner - deadline/status',
+            'If there are no clear tasks, say "No clear tasks found."',
+        ],
+        decisions: [
+            'Extract decisions, agreements, conclusions, and open questions.',
+            'Use this structure:',
+            'Decisions:',
+            '- Decision/agreement',
+            'Open questions:',
+            '- Question',
+            'If none are clear, say so briefly.',
+        ],
+        catchup: [
+            'Explain what the owner missed and what needs attention.',
+            'Use this structure:',
+            'Catch-up:',
+            '- What happened',
+            '- Needs your attention',
+            '- Suggested reply if useful',
+        ],
+    }[tool] || ['Return a concise useful analysis of the chat.'];
+
     const systemPrompt = [
-        'You summarize WhatsApp group chats for the account owner.',
+        'You analyze WhatsApp chats for the account owner.',
         'Be concise, useful, and neutral.',
         'Do not invent details.',
         'Return plain WhatsApp-friendly text only.',
-        'Use this structure:',
-        'Group recap:',
-        '- Main points',
-        '- Decisions or requests',
-        '- Things the owner may need to reply to',
-        'Keep it under 10 short lines.',
+        ...toolInstructions,
     ].join('\n');
 
     const messagesForLlm = [{
         role: 'user',
-        content: `Summarize these recent group messages:\n\n${transcript}`,
+        content: `Analyze these recent WhatsApp messages:\n\n${transcript}`,
     }];
 
     for (const provider of providers) {
@@ -101,11 +134,56 @@ async function summarizeGroup({ jid, text }) {
             });
             return reply;
         } catch (err) {
-            logger.warn('Group summary provider failed', { provider, err: err.message });
+            logger.warn('Chat tool provider failed', { provider, tool, err: err.message });
         }
     }
 
-    return 'I tried to summarize this group, but the LLM providers failed. Check the logs/API keys.';
+    return 'I tried to run that chat tool, but the LLM providers failed. Check the logs/API keys.';
 }
 
-module.exports = { summarizeGroup };
+async function runTextTool({ jid, text, tool }) {
+    const payload = String(text || '').replace(/^!\w+\s*/i, '').trim();
+    if (!payload) return null;
+
+    const providers = getAvailableProviders();
+    if (!providers.length) {
+        return 'No LLM key is configured yet, so I cannot run that tool right now.';
+    }
+
+    const instructions = {
+        ask: 'Answer the user clearly and concisely. Plain WhatsApp text only.',
+        rewrite: 'Rewrite the text to sound natural, clear, and WhatsApp-friendly. Return only the rewritten text.',
+        polish: 'Polish the text while keeping the meaning and voice. Return only the polished text.',
+        translate: 'Translate the text. If a target language is named at the start, use it. Return only the translation.',
+        short: 'Make the text shorter without losing the key meaning. Return only the shortened text.',
+    }[tool] || 'Help with the text. Return only the useful output.';
+
+    const systemPrompt = [
+        'You are a private WhatsApp utility for the account owner.',
+        instructions,
+        'Do not mention that you are an AI.',
+    ].join('\n');
+
+    const messagesForLlm = [{ role: 'user', content: payload }];
+
+    for (const provider of providers) {
+        try {
+            const reply = sanitizeToolReply(await callProvider(provider, systemPrompt, messagesForLlm));
+            recordLlmUsage({
+                jid,
+                provider,
+                model: provider,
+                estimatedInput: estimateTokens(systemPrompt) + estimateTokens(payload),
+                estimatedOutput: estimateTokens(reply),
+                estimatedTotal: estimateTokens(systemPrompt) + estimateTokens(payload) + estimateTokens(reply),
+            });
+            return reply;
+        } catch (err) {
+            logger.warn('Text tool provider failed', { provider, tool, err: err.message });
+        }
+    }
+
+    return 'I tried to run that text tool, but the LLM providers failed. Check the logs/API keys.';
+}
+
+module.exports = { runTextTool, runThreadTool };

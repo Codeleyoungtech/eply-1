@@ -52,11 +52,20 @@ EPLY can stay quiet in group chats until it is needed.
 | Tag your WhatsApp number | EPLY replies in the group when mentioned |
 | Reply to one of your messages | EPLY can respond inside that group thread |
 | `!summary` or `!recap` | Summarize recent group messages |
+| `!catchup` | Explain what you missed and what needs attention |
+| `!todo` / `!tasks` | Extract action items from recent chat |
+| `!decisions` | Extract decisions and open questions |
 | `!summary 80` | Summarize up to 80 recent stored messages |
+| `!ask <question>` | Ask a private utility question from WhatsApp |
+| `!rewrite <text>` | Rewrite text |
+| `!polish <text>` | Clean up text |
+| `!translate <lang> <text>` | Translate text |
+| `!shorten <text>` | Make text shorter |
+| `!mute` / `!unmute` | Silence or allow auto-replies in the current chat |
 | `!groupmode on/off` | Toggle group features from WhatsApp |
 | `!storegroups on/off` | Toggle group message storage for summaries |
 
-Group summaries require `store_group_messages=true` because EPLY needs saved group history to recap. Mention replies do not require group history storage.
+Group replies trigger when your WhatsApp number is tagged or when the message contains `@eply`. You can change the alias with `EPLY_TRIGGER_NAME`. Group summaries, catch-up, tasks, and decisions require `store_group_messages=true` because EPLY needs saved group history to analyze. Mention replies do not require group history storage.
 
 ## Deploy on Railway
 

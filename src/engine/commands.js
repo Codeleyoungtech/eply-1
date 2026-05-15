@@ -19,7 +19,7 @@
 
 const { logger } = require('../logger');
 const db = require('../db/queries');
-const { summarizeGroup } = require('./groupTools');
+const { runTextTool, runThreadTool } = require('./groupTools');
 
 const COMMANDS = new Map([
     ['!ping',   handlePing],
@@ -32,6 +32,17 @@ const COMMANDS = new Map([
     ['!whoami', handleWhoami],
     ['!summary', handleSummary],
     ['!recap',   handleSummary],
+    ['!catchup', handleCatchup],
+    ['!todo', handleTodo],
+    ['!tasks', handleTodo],
+    ['!decisions', handleDecisions],
+    ['!ask', handleAsk],
+    ['!rewrite', handleRewrite],
+    ['!polish', handlePolish],
+    ['!translate', handleTranslate],
+    ['!shorten', handleShorten],
+    ['!mute', handleMute],
+    ['!unmute', handleUnmute],
     ['!groupmode', handleGroupMode],
     ['!storegroups', handleStoreGroups],
 ]);
@@ -67,7 +78,16 @@ function handleHelp() {
         '`!on`     — enable auto-replies (admin only)',
         '`!off`    — disable auto-replies (admin only)',
         '`!whoami` — show admin number',
-        '`!summary` — summarize recent group chat (admin only, groups)',
+        '`!summary` / `!recap` — summarize recent chat',
+        '`!catchup` — show what needs attention',
+        '`!todo` — extract tasks from recent chat',
+        '`!decisions` — extract decisions/open questions',
+        '`!ask <question>` — private utility answer',
+        '`!rewrite <text>` — rewrite text',
+        '`!polish <text>` — clean up text',
+        '`!translate <lang> <text>` — translate text',
+        '`!shorten <text>` — make text shorter',
+        '`!mute` / `!unmute` — silence or allow this chat',
         '`!groupmode on|off` — toggle group features (admin only)',
         '`!storegroups on|off` — store group messages for summaries (admin only)',
         '',
@@ -121,15 +141,36 @@ function handleWhoami() {
 }
 
 async function handleSummary({ text, jid, isAdmin, isGroup }) {
-    if (!isAdmin) return '❌ Only the admin can summarize group chats.';
-    if (!isGroup) return 'Use `!summary` inside a group chat.';
-    if (db.getSetting('group_summary_enabled') !== 'true') {
-        return 'Group summaries are currently disabled.';
-    }
-    if (db.getSetting('store_group_messages') !== 'true') {
+    if (!isAdmin) return '❌ Only the admin can summarize chats.';
+    if (isGroup && db.getSetting('group_summary_enabled') !== 'true') return 'Group summaries are currently disabled.';
+    if (isGroup && db.getSetting('store_group_messages') !== 'true') {
         return 'Group message storage is off. Send `!storegroups on`, let the group chat for a bit, then use `!summary`.';
     }
-    return summarizeGroup({ jid, text });
+    return runThreadTool({ jid, text, tool: 'summary', isGroup });
+}
+
+async function handleCatchup({ text, jid, isAdmin, isGroup }) {
+    if (!isAdmin) return '❌ Only the admin can use catch-up.';
+    if (isGroup && db.getSetting('store_group_messages') !== 'true') {
+        return 'Group message storage is off. Send `!storegroups on`, let the group chat for a bit, then use `!catchup`.';
+    }
+    return runThreadTool({ jid, text, tool: 'catchup', isGroup });
+}
+
+async function handleTodo({ text, jid, isAdmin, isGroup }) {
+    if (!isAdmin) return '❌ Only the admin can extract tasks.';
+    if (isGroup && db.getSetting('store_group_messages') !== 'true') {
+        return 'Group message storage is off. Send `!storegroups on`, let the group chat for a bit, then use `!todo`.';
+    }
+    return runThreadTool({ jid, text, tool: 'todo', isGroup });
+}
+
+async function handleDecisions({ text, jid, isAdmin, isGroup }) {
+    if (!isAdmin) return '❌ Only the admin can extract decisions.';
+    if (isGroup && db.getSetting('store_group_messages') !== 'true') {
+        return 'Group message storage is off. Send `!storegroups on`, let the group chat for a bit, then use `!decisions`.';
+    }
+    return runThreadTool({ jid, text, tool: 'decisions', isGroup });
 }
 
 function parseOnOff(text) {
@@ -157,6 +198,43 @@ function handleStoreGroups({ text, isAdmin }) {
     return value === 'true'
         ? '🟢 Group message storage enabled for summaries and context.'
         : '🔴 Group message storage disabled.';
+}
+
+async function handleAsk({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text, tool: 'ask' }) || 'Usage: `!ask your question`';
+}
+
+async function handleRewrite({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text, tool: 'rewrite' }) || 'Usage: `!rewrite your text`';
+}
+
+async function handlePolish({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text, tool: 'polish' }) || 'Usage: `!polish your text`';
+}
+
+async function handleTranslate({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text, tool: 'translate' }) || 'Usage: `!translate French your text`';
+}
+
+async function handleShorten({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text, tool: 'short' }) || 'Usage: `!shorten your text`';
+}
+
+function handleMute({ jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can mute chats.';
+    db.saveContactProfile({ jid, muted: 1 });
+    return '🔕 This chat is now muted. I will not auto-reply here.';
+}
+
+function handleUnmute({ jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can unmute chats.';
+    db.saveContactProfile({ jid, muted: 0 });
+    return '🔔 This chat is unmuted.';
 }
 
 module.exports = { isCommand, runCommand };

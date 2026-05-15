@@ -109,13 +109,19 @@ function extractContextInfo(msg) {
 
 function isMentioned(msg, meJid, adminNumber) {
     const body = extractText(msg) || '';
+    const normalizedBody = body.toLowerCase();
     const mentioned = extractContextInfo(msg)?.mentionedJid || [];
+    const botAliases = String(process.env.EPLY_TRIGGER_NAME || 'eply')
+        .split(',')
+        .map((alias) => alias.trim().toLowerCase())
+        .filter(Boolean);
 
     if (meJid && mentioned.includes(meJid)) return true;
 
     const adminJid = `${adminNumber}@s.whatsapp.net`;
     if (adminNumber && mentioned.includes(adminJid)) return true;
     if (adminNumber && body.includes(`@${adminNumber}`)) return true;
+    if (botAliases.some((alias) => normalizedBody.includes(`@${alias}`))) return true;
 
     if (meJid) {
         const meNumber = meJid.split('@')[0];
@@ -222,11 +228,6 @@ async function handleMessage(msg) {
             return;
         }
 
-        if (contactProfile?.muted) {
-            logger.info('Muted contact/thread — silencing reply', { jid });
-            return;
-        }
-
         if (!text && !mediaType) {
             logger.debug('Ignoring non-content message', { jid, isGroup, isSelfChat });
             return;
@@ -246,6 +247,11 @@ async function handleMessage(msg) {
                 logger.info('Command handled', { jid, cmd: text.split(' ')[0] });
                 return;
             }
+        }
+
+        if (contactProfile?.muted) {
+            logger.info('Muted contact/thread — silencing reply', { jid });
+            return;
         }
 
         // ── Bot guard: skip own outgoing messages (except self-chat for testing)
