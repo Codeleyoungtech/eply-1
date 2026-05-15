@@ -14,7 +14,9 @@ router.post('/', (req, res) => {
         'default_model', 'notify_method', 'digest_time', 'digest_timezone',
         'urgency_keywords', 'log_level',
         'daily_reply_limit', 'daily_estimated_token_limit',
-        'store_group_messages', 'reply_style_guard',
+        'store_group_messages', 'group_features_enabled', 'group_mention_replies',
+        'group_reply_to_me_replies', 'group_summary_enabled',
+        'group_summary_default_limit', 'reply_style_guard',
     ];
     for (const key of allowedKeys) {
         if (req.body[key] !== undefined) {

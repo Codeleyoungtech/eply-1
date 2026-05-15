@@ -184,6 +184,7 @@ async function routeAndReply(ctx) {
             toneCtx,
             model,
             contactProfile: ctx.contactProfile,
+            isGroup: ctx.isGroup,
         });
 
         try {

@@ -6,7 +6,10 @@
  * Adds per-model addenda (Groq, Gemini, Claude) from PRD §7.2.
  */
 
-function buildPrompt({ identity, contactName, incomingText, history = [], memories = [], toneCtx, model, historySummary = null, contactProfile = null }) {
+function buildPrompt({
+    identity, contactName, incomingText, history = [], memories = [], toneCtx, model,
+    historySummary = null, contactProfile = null, isGroup = false,
+}) {
     const now = new Date().toLocaleString('en-GB', {
         timeZone: identity.timezone || 'Africa/Johannesburg',
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -91,7 +94,7 @@ ${clamp(identity.real_examples, 1200, '(no examples provided yet — fill the id
 
 # RUNTIME CONTEXT
 Current time:     ${now}
-Talking to:       ${contactName || 'Unknown contact'}
+Talking to:       ${isGroup ? `${contactName || 'Someone'} inside a WhatsApp group` : (contactName || 'Unknown contact')}
 Tone detected:    ${toneCtx}
 Tone instruction: ${toneInstruction}
 
@@ -118,6 +121,8 @@ ${historySummary}
 12. Off-limits topics: ${clamp(identity.off_limits || 'money transfers, legal advice, medical advice', 220)}
     → Stay brief and non-committal for these. Never engage directly.
 
+${buildGroupAddendum(isGroup, contactName)}
+
 ${buildModelAddendum(model, name)}
 
 ${buildContactProfileAddendum(contactProfile)}
@@ -136,6 +141,18 @@ ${buildPersonaAddendum({
     chatMessages.push({ role: 'user', content: incomingText || '' });
 
     return { systemPrompt, messages: chatMessages };
+}
+
+function buildGroupAddendum(isGroup, contactName) {
+    if (!isGroup) return '';
+
+    return `# GROUP CHAT MODE
+You are replying in a WhatsApp group because you were tagged or someone replied to you.
+Answer only the specific thing that pulled you in.
+Keep the reply short, social, and low-noise.
+Do not summarize the whole group unless explicitly asked.
+Do not act like a public assistant or moderator.
+If addressing someone directly, address ${contactName || 'the sender'} naturally.`;
 }
 
 function buildModelAddendum(model, name) {

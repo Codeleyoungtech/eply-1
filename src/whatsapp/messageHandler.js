@@ -99,9 +99,17 @@ function extractSenderJid(msg) {
     );
 }
 
+function extractContextInfo(msg) {
+    const content = unwrapMessageContent(msg?.message);
+    if (!content) return {};
+    const type = getContentType(content);
+    if (!type) return {};
+    return content[type]?.contextInfo || {};
+}
+
 function isMentioned(msg, meJid, adminNumber) {
     const body = extractText(msg) || '';
-    const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const mentioned = extractContextInfo(msg)?.mentionedJid || [];
 
     if (meJid && mentioned.includes(meJid)) return true;
 
@@ -119,7 +127,7 @@ function isMentioned(msg, meJid, adminNumber) {
 
 function isReplyToMe(msg, meJid) {
     if (!meJid) return false;
-    const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+    const contextInfo = extractContextInfo(msg);
     const quotedId = contextInfo?.stanzaId;
     const quotedParticipant = contextInfo?.participant;
     if (!quotedId || !quotedParticipant) return false;
@@ -206,7 +214,7 @@ async function handleMessage(msg) {
         const mediaType = extractMediaType(msg);
         const contactName = extractName(msg);
         const adminNumber = process.env.ADMIN_NUMBER || '';
-        const isAdmin = adminNumber && senderPhone.startsWith(adminNumber);
+        const isAdmin = msg.key.fromMe || (adminNumber && senderPhone.startsWith(adminNumber));
         const contactProfile = getContactProfile(jid);
 
         if (isSelfChat && !allowSelfChat) {
@@ -231,7 +239,7 @@ async function handleMessage(msg) {
 
         // ── 1. Built-in commands — ALWAYS work regardless of auto-reply toggle ─
         if (text && isCommand(text)) {
-            const cmdReply = await runCommand({ text, jid, isAdmin });
+            const cmdReply = await runCommand({ text, jid, isAdmin, isGroup });
             if (cmdReply) {
                 await sendMessage(jid, cmdReply);
                 saveMessage({ jid, contactName, direction: 'out', content: cmdReply, llmUsed: 'builtin', isGroup });
@@ -259,9 +267,10 @@ async function handleMessage(msg) {
 
         // ── Save incoming message to DB ────────────────────────────────────────
         const storeGroupMessages = getSetting('store_group_messages') === 'true';
+        const groupFeaturesEnabled = getSetting('group_features_enabled') !== 'false';
         if (text || mediaType) {
             if (!isGroup || storeGroupMessages) {
-            saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
+                saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
             }
         }
 
@@ -285,6 +294,9 @@ async function handleMessage(msg) {
         const rule = applyReplyRules({
             jid, phone: senderPhone, senderJid, text, isGroup,
             mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true,
+            groupFeaturesEnabled,
+            groupMentionReplies: getSetting('group_mention_replies') !== 'false',
+            groupReplyToMeReplies: getSetting('group_reply_to_me_replies') !== 'false',
         });
 
         logger.debug('Rule result', { action: rule.action, reason: rule.reason });

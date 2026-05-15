@@ -36,7 +36,11 @@ const GM_PATTERNS = [
  * @param {boolean} opts.autoReplyEnabled
  * @returns {object} action
  */
-function applyReplyRules({ jid, phone, senderJid, text, isGroup, mentionedMe, replyToMe, adminNumber, autoReplyEnabled }) {
+function applyReplyRules({
+    jid, phone, senderJid, text, isGroup, mentionedMe, replyToMe, adminNumber,
+    autoReplyEnabled, groupFeaturesEnabled = true, groupMentionReplies = true,
+    groupReplyToMeReplies = true,
+}) {
     const vip = isVip(phone, senderJid);
 
     // ── 1. Auto-reply master toggle ────────────────────────────────────────────
@@ -62,12 +66,18 @@ function applyReplyRules({ jid, phone, senderJid, text, isGroup, mentionedMe, re
 
     // ── 4. Group chat rules ───────────────────────────────────────────────────
     if (isGroup) {
+        if (!groupFeaturesEnabled) {
+            return { action: 'silent', reason: 'group_features_disabled' };
+        }
         // GM = always silent in groups
         if (text && GM_PATTERNS.some(p => p.test(text.trim()))) {
             return { action: 'silent', reason: 'group_gm' };
         }
-        // Default group scope: reply only when explicitly tagged unless overridden.
-        if (!mentionedMe && process.env.ALLOW_GROUP_UNTAGGED_AI !== 'true') {
+        const triggeredByMention = groupMentionReplies && mentionedMe;
+        const triggeredByReply = groupReplyToMeReplies && replyToMe;
+
+        // Default group scope: reply only when explicitly pulled in unless overridden.
+        if (!triggeredByMention && !triggeredByReply && process.env.ALLOW_GROUP_UNTAGGED_AI !== 'true') {
             return { action: 'silent', reason: 'group_no_trigger' };
         }
         // We ARE needed — fall through to reply logic

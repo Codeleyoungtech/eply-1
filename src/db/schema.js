@@ -165,6 +165,11 @@ function initDb() {
       ('daily_reply_limit',  '80'),
       ('daily_estimated_token_limit', '12000'),
       ('store_group_messages', 'false'),
+      ('group_features_enabled', 'true'),
+      ('group_mention_replies', 'true'),
+      ('group_reply_to_me_replies', 'true'),
+      ('group_summary_enabled', 'true'),
+      ('group_summary_default_limit', '40'),
       ('reply_style_guard',  'true');
   `);
 

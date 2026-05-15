@@ -93,6 +93,43 @@
                                             </select>
                                         </div>
                                         <div class="form-group">
+                                            <label class="form-label">Group Features</label>
+                                            <select class="form-select" name="group_features_enabled">
+                                                <% ['true','false'].forEach(v=> { %>
+                                                    <option value="<%= v %>" <%=settings.group_features_enabled===v ? 'selected' : '' %>><%= v %></option>
+                                                <% }) %>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Reply When Tagged in Groups</label>
+                                            <select class="form-select" name="group_mention_replies">
+                                                <% ['true','false'].forEach(v=> { %>
+                                                    <option value="<%= v %>" <%=settings.group_mention_replies===v ? 'selected' : '' %>><%= v %></option>
+                                                <% }) %>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Reply to Thread Replies in Groups</label>
+                                            <select class="form-select" name="group_reply_to_me_replies">
+                                                <% ['true','false'].forEach(v=> { %>
+                                                    <option value="<%= v %>" <%=settings.group_reply_to_me_replies===v ? 'selected' : '' %>><%= v %></option>
+                                                <% }) %>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Group Summaries</label>
+                                            <select class="form-select" name="group_summary_enabled">
+                                                <% ['true','false'].forEach(v=> { %>
+                                                    <option value="<%= v %>" <%=settings.group_summary_enabled===v ? 'selected' : '' %>><%= v %></option>
+                                                <% }) %>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="form-label">Group Summary Message Limit</label>
+                                            <input class="form-input" name="group_summary_default_limit"
+                                                value="<%= settings.group_summary_default_limit || '40' %>" placeholder="40" />
+                                        </div>
+                                        <div class="form-group">
                                             <label class="form-label">Reply Style Guard</label>
                                             <select class="form-select" name="reply_style_guard">
                                                 <% ['true','false'].forEach(v=> { %>

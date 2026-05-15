@@ -43,6 +43,21 @@ Then visit `http://localhost:3000/qr` and scan the QR code with WhatsApp.
 | `/logs` | Live log stream |
 | `/health` | JSON health check (Railway uptime) |
 
+## Group Chat Features
+
+EPLY can stay quiet in group chats until it is needed.
+
+| Trigger / Command | Description |
+|-------------------|-------------|
+| Tag your WhatsApp number | EPLY replies in the group when mentioned |
+| Reply to one of your messages | EPLY can respond inside that group thread |
+| `!summary` or `!recap` | Summarize recent group messages |
+| `!summary 80` | Summarize up to 80 recent stored messages |
+| `!groupmode on/off` | Toggle group features from WhatsApp |
+| `!storegroups on/off` | Toggle group message storage for summaries |
+
+Group summaries require `store_group_messages=true` because EPLY needs saved group history to recap. Mention replies do not require group history storage.
+
 ## Deploy on Railway
 
 1. Push to a **private** GitHub repo (`.env` must be in `.gitignore`)
