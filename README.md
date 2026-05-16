@@ -53,8 +53,10 @@ EPLY can stay quiet in group chats until it is needed.
 | Tag your WhatsApp number | EPLY replies in the group when mentioned |
 | Reply to one of your messages | EPLY can respond inside that group thread |
 | Voice note | EPLY transcribes it, stores the transcript, and replies normally |
+| Image/PDF | EPLY can inspect images and PDF/document messages when media understanding is enabled |
 | `!summary` or `!recap` | Summarize recent group messages |
 | `!catchup` | Explain what you missed and what needs attention |
+| `!about <topic>` | Search recent chat history for a specific topic |
 | `!todo` / `!tasks` | Extract action items from recent chat |
 | `!decisions` | Extract decisions and open questions |
 | `!summary 80` | Summarize up to 80 recent stored messages |
@@ -63,6 +65,10 @@ EPLY can stay quiet in group chats until it is needed.
 | `!recall` / `!find` | Search private memory |
 | `!draft` | Draft a reply to quoted or pasted text |
 | `!explain` | Explain quoted or pasted text |
+| `!brain` | Clean and save a private brain dump |
+| `!post` / `!thread` / `!caption` / `!script` | Generate social/content drafts |
+| `!portfolio` / `!stack` / `!projects` / `!hireme` | Public portfolio and hiring shortcuts |
+| `!faq` | List/query FAQs; admin can add with `!faq add question | answer` |
 | `!rewrite <text>` | Rewrite text |
 | `!polish <text>` | Clean up text |
 | `!formal` / `!casual` | Change the tone of quoted or pasted text |

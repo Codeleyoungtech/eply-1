@@ -37,6 +37,7 @@ router.post('/:jid/profile', (req, res) => {
     saveContactProfile({
         jid,
         displayName: req.body.display_name,
+        chatMode: req.body.chat_mode || 'auto',
         tonePreference: req.body.tone_preference || 'auto',
         respectfulTitles: req.body.respectful_titles === 'on',
         wittyAllowed: req.body.witty_allowed === 'on',

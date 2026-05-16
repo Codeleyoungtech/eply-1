@@ -87,6 +87,13 @@ function extractMediaType(msg) {
     return null;
 }
 
+function extractMediaMimeType(msg) {
+    const content = unwrapMessageContent(msg?.message);
+    const type = getContentType(content);
+    if (!type) return null;
+    return content[type]?.mimetype || null;
+}
+
 function extractName(msg) {
     return msg.pushName || msg.key?.remoteJid?.split('@')[0] || 'Unknown';
 }
@@ -284,7 +291,7 @@ async function downloadMediaBuffer(msg, sock) {
 
 async function processPreparedReply(prepared) {
     const {
-        msg, jid, senderJid, senderPhone, text, mediaType, quotedText, contactName,
+        msg, jid, senderJid, senderPhone, text, mediaType, mediaBuffer, quotedText, contactName,
         adminNumber, isGroup, contactProfile, groupFeaturesEnabled, mentionedMe,
         replyToMe,
     } = prepared;
@@ -372,11 +379,18 @@ async function processPreparedReply(prepared) {
 
     const { reply, llm } = await routeAndReply({
         jid, contactName, incomingText, mediaType,
-        mediaBuffer: null, history, historySummary: context.summary, memories, isGroup, contactProfile,
+        mediaBuffer: mediaBuffer || null, history, historySummary: context.summary, memories, isGroup, contactProfile,
     });
 
     if (!reply) {
         logger.warn('No reply generated — suppressing send', { jid, llm });
+        return;
+    }
+
+    if (contactProfile?.chat_mode === 'draft-only') {
+        flagMessage({ jid, contactName, theirMsg: text, eplyReply: reply, reason: 'draft_only_mode' });
+        saveMessage({ jid, contactName, direction: 'out', content: `[draft] ${reply}`, llmUsed: llm, isGroup });
+        logger.info('Draft-only mode — reply saved to flagged queue, not sent', { jid, preview: reply.slice(0, 80) });
         return;
     }
 
@@ -417,6 +431,7 @@ async function handleMessage(msg) {
         const senderPhone = senderJid.replace(/[^0-9]/g, '');
         let text = extractText(msg);
         const mediaType = extractMediaType(msg);
+        let mediaBuffer = null;
         const quotedText = extractQuotedText(msg);
         const contactName = extractName(msg);
         const adminNumber = process.env.ADMIN_NUMBER || '';
@@ -451,6 +466,22 @@ async function handleMessage(msg) {
             }
         }
 
+        if ((mediaType === 'image' || mediaType === 'document') && process.env.ENABLE_MEDIA_UNDERSTANDING !== 'false') {
+            try {
+                mediaBuffer = await downloadMediaBuffer(msg, sock);
+                const mimeType = extractMediaMimeType(msg) || '';
+                if (!text) {
+                    text = mediaType === 'image'
+                        ? 'Please look at this image and respond naturally.'
+                        : `Please read and respond to this ${mimeType.includes('pdf') ? 'PDF' : 'document'} naturally.`;
+                }
+                logger.info('Media downloaded for understanding', { jid, mediaType, bytes: mediaBuffer.length });
+            } catch (err) {
+                logger.warn('Media download failed — suppressing media reply', { jid, mediaType, err: err.message });
+                return;
+            }
+        }
+
         if (mediaType && !text) {
             logger.debug('Ignoring media-only message until media ingestion is implemented', { jid, mediaType });
             return;
@@ -467,7 +498,7 @@ async function handleMessage(msg) {
             }
         }
 
-        if (contactProfile?.muted) {
+        if (contactProfile?.muted || contactProfile?.chat_mode === 'silent') {
             logger.info('Muted contact/thread — silencing reply', { jid });
             return;
         }
@@ -505,7 +536,7 @@ async function handleMessage(msg) {
         const replyToMe = isGroup ? isReplyToMe(msg, myJid) : false;
 
         await scheduleReply({
-            msg, jid, senderJid, senderPhone, text, mediaType, quotedText,
+            msg, jid, senderJid, senderPhone, text, mediaType, mediaBuffer, quotedText,
             contactName, adminNumber, isGroup, contactProfile,
             groupFeaturesEnabled,
             mentionedMe,

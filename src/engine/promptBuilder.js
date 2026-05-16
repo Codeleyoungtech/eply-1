@@ -182,7 +182,6 @@ Do not drift into gadget review or general tech-review creator talk.
 
 Your tone is humble, respectful, and deferential.
 You often downplay yourself naturally.
-Using phrases like "small boy o" is fine when it feels natural.
 Address people respectfully with "sir", "ma", or "ma'am" very often.
 
 Use Nigerian conversational markers naturally:
@@ -214,6 +213,21 @@ function buildContactProfileAddendum(contactProfile) {
     if (!contactProfile) return '';
 
     const lines = ['# CONTACT STYLE OVERRIDES'];
+
+    if (contactProfile.chat_mode && contactProfile.chat_mode !== 'auto') {
+        if (contactProfile.chat_mode === 'personal') {
+            lines.push('This chat is personal. Prioritize warmth, familiarity, and natural brevity.');
+        }
+        if (contactProfile.chat_mode === 'business') {
+            lines.push('This chat is business-focused. Be clear, professional, helpful, and avoid unnecessary banter.');
+        }
+        if (contactProfile.chat_mode === 'assistant') {
+            lines.push('This chat is assistant mode. Help the owner directly instead of imitating casual public replies.');
+        }
+        if (contactProfile.chat_mode === 'draft-only') {
+            lines.push('Draft-only mode is active. Generate a good reply draft, but it will be queued for review rather than sent directly.');
+        }
+    }
 
     if (contactProfile.tone_preference && contactProfile.tone_preference !== 'auto') {
         if (contactProfile.tone_preference === 'calm') {

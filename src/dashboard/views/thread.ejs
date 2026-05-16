@@ -42,6 +42,14 @@
                                     placeholder="Optional label for this thread" />
                             </div>
                             <div class="form-group" style="margin-bottom:0">
+                                <label class="form-label">Chat Mode</label>
+                                <select class="form-select" name="chat_mode">
+                                    <% ['auto','personal','business','assistant','draft-only','silent'].forEach(option => { %>
+                                        <option value="<%= option %>" <%= (contactProfile?.chat_mode || 'auto') === option ? 'selected' : '' %>><%= option %></option>
+                                    <% }) %>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0">
                                 <label class="form-label">Tone Preference</label>
                                 <select class="form-select" name="tone_preference">
                                     <% ['auto','calm','professional','playful'].forEach(option => { %>
