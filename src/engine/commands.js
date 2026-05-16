@@ -21,6 +21,7 @@
 const { logger } = require('../logger');
 const db = require('../db/queries');
 const { runTextTool, runThreadTool } = require('./groupTools');
+const { parseDueAt, stripReminderCommand } = require('./timeParser');
 
 const COMMANDS = new Map([
     ['!ping',   handlePing],
@@ -38,12 +39,21 @@ const COMMANDS = new Map([
     ['!catchup', handleCatchup],
     ['!about', handleAbout],
     ['!history', handleAbout],
+    ['!ocr', handleMediaHint],
+    ['!receipt', handleMediaHint],
+    ['!ui', handleMediaHint],
+    ['!contract', handleMediaHint],
     ['!todo', handleTodo],
     ['!tasks', handleTodo],
     ['!task', handleTodo],
     ['!decisions', handleDecisions],
     ['!decision', handleDecisions],
     ['!ask', handleAsk],
+    ['!remind', handleRemind],
+    ['!reminder', handleRemind],
+    ['!followup', handleRemind],
+    ['!follow-up', handleRemind],
+    ['!reminders', handleReminders],
     ['!remember', handleRemember],
     ['!remeber', handleRemember],
     ['!rember', handleRemember],
@@ -122,6 +132,7 @@ function handleMenu() {
         '━━ *2. Chat Intelligence* ━━',
         'Voice notes — transcribed and answered automatically',
         'Images/PDFs — understood when media mode is enabled',
+        '`!ocr`, `!receipt`, `!ui`, `!contract` — use as image/PDF captions',
         '`!summary` / `!recap` — summarize recent chat',
         '`!catchup` — show what needs attention',
         '`!about <topic>` — search recent chat history',
@@ -132,6 +143,8 @@ function handleMenu() {
         '`!remember` / `!save` — save memory',
         '`!recall` / `!find` — search memory',
         '`!brain` — clean and save a brain dump',
+        '`!remind me tomorrow 9am to call John`',
+        '`!followup Friday about invoice`',
         '_Tip: swipe-reply to any message, then send `!remember`._',
         '',
         '━━ *4. Text & Reply Tools* ━━',
@@ -250,6 +263,12 @@ async function handleAbout({ text, jid, isAdmin, isGroup }) {
     return runThreadTool({ jid, text, tool: 'query', isGroup });
 }
 
+function handleMediaHint({ text, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can use media tools.';
+    const command = String(text || '').trim().split(/\s+/)[0];
+    return `Send an image or PDF with caption \`${command} what you want me to do\`. Example: send a receipt photo with caption \`!receipt extract expense\`.`;
+}
+
 async function handleTodo({ text, jid, isAdmin, isGroup }) {
     if (!isAdmin) return '❌ Only the admin can extract tasks.';
     if (isGroup && db.getSetting('store_group_messages') !== 'true') {
@@ -325,6 +344,26 @@ function handleRecall({ text, isAdmin, quotedText }) {
     return [
         '*Memory matches*',
         ...rows.map((row, index) => `${index + 1}. ${row.fact}`),
+    ].join('\n');
+}
+
+function handleRemind({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can create reminders.';
+    const direct = stripReminderCommand(text);
+    const reminderText = direct || String(quotedText || '').trim();
+    if (!reminderText) return 'Usage: `!remind me tomorrow 9am to call John`';
+    const dueAt = parseDueAt(text);
+    db.createReminder({ jid, text: reminderText, dueAt });
+    return `Reminder saved for ${new Date(dueAt * 1000).toLocaleString('en-GB')}.`;
+}
+
+function handleReminders({ isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can view reminders.';
+    const rows = db.getUpcomingReminders(10);
+    if (!rows.length) return 'No upcoming reminders.';
+    return [
+        '*Upcoming reminders*',
+        ...rows.map((row, index) => `${index + 1}. ${new Date(row.due_at * 1000).toLocaleString('en-GB')} — ${row.text}`),
     ].join('\n');
 }
 

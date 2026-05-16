@@ -22,6 +22,11 @@ const GM_PATTERNS = [
     /^(gm|good morning|morning|gm!|good morning!|morning!|🌞|☀️|🌅)\.?$/i,
 ];
 
+const LOW_VALUE_PATTERNS = [
+    /^(ok|okay|kk|k|alright|noted|sure|yes|yeah|yep|no|nah|lol|lmao|haha|thanks|thank you|tnx|👍|🙏|😂|🤣|🙌|👌|✅|💯)[\s.!?]*$/i,
+    /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u,
+];
+
 /**
  * Determines what to do with an incoming WhatsApp message.
  *
@@ -53,6 +58,11 @@ function applyReplyRules({
     if (text && SPAM_PATTERNS.some(p => p.test(text))) {
         logger.debug('Spam detected — silencing', { jid });
         return { action: 'silent', reason: 'spam' };
+    }
+
+    if (text && LOW_VALUE_PATTERNS.some(p => p.test(text.trim()))) {
+        logger.debug('Low-value message — silencing', { jid });
+        return { action: 'silent', reason: 'low_value_ack' };
     }
 
     // ── 3. VIP Guard ─────────────────────────────────────────────────────────

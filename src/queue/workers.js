@@ -8,7 +8,8 @@
 
 const cron = require('node-cron');
 const { buildAndSendDigest } = require('../engine/digestBuilder');
-const { getSetting } = require('../db/queries');
+const { getDueReminders, getSetting, markReminderDelivered } = require('../db/queries');
+const { sendMessage } = require('../whatsapp/connection');
 const { logger } = require('../logger');
 
 function startDigestCron() {
@@ -28,6 +29,22 @@ function startDigestCron() {
             logger.error('Digest cron error', { err: err.message });
         }
     }, { timezone: tz });
+}
+
+function startReminderWorker() {
+    setInterval(async () => {
+        const due = getDueReminders();
+        for (const reminder of due) {
+            try {
+                await sendMessage(reminder.jid, `Reminder: ${reminder.text}`);
+                markReminderDelivered(reminder.id);
+                logger.info('Reminder delivered', { id: reminder.id, jid: reminder.jid });
+            } catch (err) {
+                logger.warn('Reminder delivery failed', { id: reminder.id, err: err.message });
+            }
+        }
+    }, 30_000);
+    logger.info('Reminder worker started');
 }
 
 function startRetryWorker() {
@@ -54,4 +71,4 @@ function startRetryWorker() {
     }
 }
 
-module.exports = { startDigestCron, startRetryWorker };
+module.exports = { startDigestCron, startRetryWorker, startReminderWorker };

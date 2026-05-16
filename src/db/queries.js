@@ -147,8 +147,16 @@ function getFlagged(includeHandled = false) {
     return getDb().prepare(`SELECT * FROM flagged ${where} ORDER BY created_at DESC`).all();
 }
 
+function getFlaggedById(id) {
+    return getDb().prepare('SELECT * FROM flagged WHERE id = ?').get(id) || null;
+}
+
 function markHandled(id) {
     return getDb().prepare('UPDATE flagged SET handled = 1 WHERE id = ?').run(id);
+}
+
+function updateFlaggedReply(id, reply) {
+    return getDb().prepare('UPDATE flagged SET eply_reply = ? WHERE id = ?').run(reply, id);
 }
 
 // ── Digests ───────────────────────────────────────────────────────────────────
@@ -285,15 +293,40 @@ function touchJob(id) {
         .run(Math.floor(Date.now() / 1000), id);
 }
 
+// ── Reminders / Follow-ups ──────────────────────────────────────────────────
+
+function createReminder({ jid, text, dueAt }) {
+    return getDb()
+        .prepare('INSERT INTO reminders (jid, text, due_at) VALUES (?, ?, ?)')
+        .run(jid, text, dueAt);
+}
+
+function getDueReminders(now = Math.floor(Date.now() / 1000)) {
+    return getDb()
+        .prepare('SELECT * FROM reminders WHERE delivered = 0 AND due_at <= ? ORDER BY due_at ASC LIMIT 20')
+        .all(now);
+}
+
+function markReminderDelivered(id) {
+    return getDb().prepare('UPDATE reminders SET delivered = 1 WHERE id = ?').run(id);
+}
+
+function getUpcomingReminders(limit = 10) {
+    return getDb()
+        .prepare('SELECT * FROM reminders WHERE delivered = 0 ORDER BY due_at ASC LIMIT ?')
+        .all(limit);
+}
+
 module.exports = {
     getIdentity, saveIdentity,
     getVips, isVip, addVip, removeVip,
     saveMessage, getThread, getAllChats, getTodayStats, deleteMessagesByIds, deleteMessagesByJid,
     recordLlmUsage, getTodayLlmUsage,
-    flagMessage, getFlagged, markHandled,
+    flagMessage, getFlagged, getFlaggedById, markHandled, updateFlaggedReply,
     saveDigest, getDigests, markDigestDelivered,
     saveFact, getMemories, getAllMemories, searchMemories, deleteFact, updateFact,
     getContactProfile, saveContactProfile,
     getSetting, setSetting, getAllSettings,
     getJobs, createJob, deleteJob, touchJob,
+    createReminder, getDueReminders, markReminderDelivered, getUpcomingReminders,
 };

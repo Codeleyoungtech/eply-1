@@ -147,6 +147,17 @@ function initDb() {
       created_at  INTEGER DEFAULT (strftime('%s', 'now'))
     );
 
+    -- ── Reminders / Follow-ups ──────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS reminders (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      jid         TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      due_at      INTEGER NOT NULL,
+      delivered   INTEGER DEFAULT 0,
+      created_at  INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders (due_at, delivered);
+
     -- ── Settings Key-Value ──────────────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS settings (
       key         TEXT PRIMARY KEY,

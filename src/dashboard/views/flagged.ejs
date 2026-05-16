@@ -65,10 +65,15 @@
                                                         <%= item.their_msg %>
                                                     </span></div>
                                                 <% if (item.eply_reply) { %>
-                                                    <div><span style="color:var(--muted);font-size:12px">EPLY
-                                                            replied:</span><br /><span
-                                                            style="color:#a5b4fc;font-size:13.5px">"<%= item.eply_reply
-                                                                %>"</span></div>
+                                                    <form method="POST" action="/flagged/<%= item.id %>/send" style="margin-top:10px">
+                                                        <label class="form-label">Draft / Reply</label>
+                                                        <textarea class="form-textarea" name="reply" rows="3"><%= item.eply_reply %></textarea>
+                                                        <% if (!item.handled) { %>
+                                                            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">
+                                                                <button class="btn btn-primary btn-sm">Send Approved Reply</button>
+                                                            </div>
+                                                        <% } %>
+                                                    </form>
                                                     <% } %>
                                             </div>
                                             <% if (!item.handled) { %>

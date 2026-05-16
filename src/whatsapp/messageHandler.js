@@ -204,6 +204,7 @@ function getBudgetFallbackReply(isGroup) {
 }
 
 const pendingReplies = new Map();
+const lastAutoReplyAt = new Map();
 
 function getDebounceMs(isGroup) {
     const raw = isGroup
@@ -238,6 +239,15 @@ function mergePendingItems(items) {
         replyToMe: items.some((item) => item.replyToMe),
         batchSize: items.length,
     };
+}
+
+function getReplyCooldownMs(isGroup) {
+    const raw = isGroup
+        ? (process.env.GROUP_REPLY_COOLDOWN_MS || process.env.REPLY_COOLDOWN_MS || '60000')
+        : (process.env.REPLY_COOLDOWN_MS || '45000');
+    const ms = Number(raw);
+    if (!Number.isFinite(ms) || ms < 0) return 0;
+    return Math.min(ms, 10 * 60_000);
 }
 
 function scheduleReply(prepared) {
@@ -327,6 +337,14 @@ async function processPreparedReply(prepared) {
 
     if (rule.action === 'silent') return;
 
+    const cooldownMs = getReplyCooldownMs(isGroup);
+    const lastReplyAt = lastAutoReplyAt.get(jid) || 0;
+    const bypassCooldown = Boolean(quotedText || mentionedMe || replyToMe || rule.urgency?.urgent);
+    if (!bypassCooldown && cooldownMs && Date.now() - lastReplyAt < cooldownMs) {
+        logger.info('Reply cooldown active — suppressing extra reply', { jid, cooldownMs });
+        return;
+    }
+
     if (rule.action === 'ping_only') {
         await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: rule.reason, isVip: rule.isVip });
         return;
@@ -409,6 +427,7 @@ async function processPreparedReply(prepared) {
     }
 
     await sendReplyChunks(jid, reply, msg);
+    lastAutoReplyAt.set(jid, Date.now());
     resetFollowUp(jid);
     saveMessage({ jid, contactName, direction: 'out', content: reply, llmUsed: llm, isGroup });
 
