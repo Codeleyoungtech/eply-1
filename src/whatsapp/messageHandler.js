@@ -120,21 +120,31 @@ function isMentioned(msg, meJid, adminNumber) {
     const body = extractText(msg) || '';
     const normalizedBody = body.toLowerCase();
     const mentioned = extractContextInfo(msg)?.mentionedJid || [];
+    const bodyDigits = body.replace(/[^0-9]/g, '');
+    const adminDigits = String(adminNumber || '').replace(/[^0-9]/g, '');
+    const meDigits = String(meJid || '').split('@')[0].replace(/[^0-9]/g, '');
     const botAliases = String(process.env.EPLY_TRIGGER_NAME || 'eply')
         .split(',')
         .map((alias) => alias.trim().toLowerCase())
         .filter(Boolean);
 
-    if (meJid && mentioned.includes(meJid)) return true;
+    const mentionedNormalized = mentioned.map((jid) => jidNormalizedUser(jid));
+    const mentionedDigits = mentioned.map((jid) => String(jid || '').split('@')[0].replace(/[^0-9]/g, ''));
+
+    if (meJid && mentionedNormalized.includes(jidNormalizedUser(meJid))) return true;
 
     const adminJid = `${adminNumber}@s.whatsapp.net`;
-    if (adminNumber && mentioned.includes(adminJid)) return true;
+    if (adminNumber && mentionedNormalized.includes(jidNormalizedUser(adminJid))) return true;
+    if (adminDigits && mentionedDigits.some((digits) => digits === adminDigits || digits.endsWith(adminDigits) || adminDigits.endsWith(digits))) return true;
+    if (meDigits && mentionedDigits.some((digits) => digits === meDigits || digits.endsWith(meDigits) || meDigits.endsWith(digits))) return true;
     if (adminNumber && body.includes(`@${adminNumber}`)) return true;
+    if (adminDigits && bodyDigits.includes(adminDigits)) return true;
     if (botAliases.some((alias) => normalizedBody.includes(`@${alias}`))) return true;
 
     if (meJid) {
         const meNumber = meJid.split('@')[0];
         if (meNumber && body.includes(`@${meNumber}`)) return true;
+        if (meDigits && bodyDigits.includes(meDigits)) return true;
     }
 
     return false;
