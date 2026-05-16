@@ -106,6 +106,11 @@ async function runThreadTool({ jid, text, tool = 'summary', isGroup = false }) {
             '- Needs your attention',
             '- Suggested reply if useful',
         ],
+        query: [
+            'Answer the owner\'s specific question about this chat history.',
+            'Use only the transcript. If the answer is not in the transcript, say so.',
+            'Keep it concise and include who said it when useful.',
+        ],
     }[tool] || ['Return a concise useful analysis of the chat.'];
 
     const systemPrompt = [
@@ -118,7 +123,7 @@ async function runThreadTool({ jid, text, tool = 'summary', isGroup = false }) {
 
     const messagesForLlm = [{
         role: 'user',
-        content: `Analyze these recent WhatsApp messages:\n\n${transcript}`,
+        content: `Request: ${String(text || '').replace(/^!\w+\s*/i, '').trim() || tool}\n\nRecent WhatsApp messages:\n\n${transcript}`,
     }];
 
     for (const provider of providers) {
@@ -152,10 +157,20 @@ async function runTextTool({ jid, text, tool }) {
 
     const instructions = {
         ask: 'Answer the user clearly and concisely. Plain WhatsApp text only.',
+        explain: 'Explain the text in simple, clear language. If it is confusing, clarify the likely meaning. Plain WhatsApp text only.',
+        draft: 'Draft a natural reply to this message in the account owner\'s voice. Return only the reply text.',
+        brain: 'Clean this brain dump into a short note with tags. Use this format: Title: ...\\nTags: ...\\nNote: ...',
+        post: 'Turn the idea into a polished LinkedIn-style post. Keep it natural and not too long.',
+        thread: 'Turn the idea into a concise X/Twitter thread with numbered posts.',
+        caption: 'Turn the idea into a punchy social media caption with a few tasteful hashtags.',
+        script: 'Turn the idea into a short video script with hook, body, and CTA.',
         rewrite: 'Rewrite the text to sound natural, clear, and WhatsApp-friendly. Return only the rewritten text.',
         polish: 'Polish the text while keeping the meaning and voice. Return only the polished text.',
+        formal: 'Rewrite the text in a respectful, professional tone. Return only the rewritten text.',
+        casual: 'Rewrite the text in a relaxed, natural WhatsApp tone. Return only the rewritten text.',
         translate: 'Translate the text. If a target language is named at the start, use it. Return only the translation.',
         short: 'Make the text shorter without losing the key meaning. Return only the shortened text.',
+        bullets: 'Turn the text into concise bullet points. Keep only the useful points.',
     }[tool] || 'Help with the text. Return only the useful output.';
 
     const systemPrompt = [

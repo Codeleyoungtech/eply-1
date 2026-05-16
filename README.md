@@ -59,12 +59,16 @@ EPLY can stay quiet in group chats until it is needed.
 | `!decisions` | Extract decisions and open questions |
 | `!summary 80` | Summarize up to 80 recent stored messages |
 | `!ask <question>` | Ask a private utility question from WhatsApp |
-| `!remember <fact>` | Save something to private memory |
-| `!recall <query>` | Search private memory |
+| `!remember` / `!save` | Save something to private memory, including quoted messages |
+| `!recall` / `!find` | Search private memory |
+| `!draft` | Draft a reply to quoted or pasted text |
+| `!explain` | Explain quoted or pasted text |
 | `!rewrite <text>` | Rewrite text |
 | `!polish <text>` | Clean up text |
+| `!formal` / `!casual` | Change the tone of quoted or pasted text |
 | `!translate <lang> <text>` | Translate text |
-| `!shorten <text>` | Make text shorter |
+| `!shorten` / `!short` | Make text shorter |
+| `!bullets` | Turn quoted or pasted text into bullets |
 | `!mute` / `!unmute` | Silence or allow auto-replies in the current chat |
 | `!groupmode on/off` | Toggle group features from WhatsApp |
 | `!storegroups on/off` | Toggle group message storage for summaries |

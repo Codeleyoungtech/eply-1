@@ -36,6 +36,8 @@ const COMMANDS = new Map([
     ['!summary', handleSummary],
     ['!recap',   handleSummary],
     ['!catchup', handleCatchup],
+    ['!about', handleAbout],
+    ['!history', handleAbout],
     ['!todo', handleTodo],
     ['!tasks', handleTodo],
     ['!task', handleTodo],
@@ -43,14 +45,38 @@ const COMMANDS = new Map([
     ['!decision', handleDecisions],
     ['!ask', handleAsk],
     ['!remember', handleRemember],
+    ['!remeber', handleRemember],
+    ['!rember', handleRemember],
+    ['!save', handleRemember],
+    ['!note', handleRemember],
     ['!recall', handleRecall],
     ['!find', handleRecall],
+    ['!search', handleRecall],
+    ['!brain', handleBrain],
+    ['!dump', handleBrain],
+    ['!explain', handleExplain],
+    ['!draft', handleDraft],
+    ['!post', handlePost],
+    ['!thread', handleThread],
+    ['!caption', handleCaption],
+    ['!script', handleScript],
+    ['!portfolio', handlePortfolio],
+    ['!stack', handleStack],
+    ['!projects', handleProjects],
+    ['!hireme', handleHireMe],
+    ['!faq', handleFaq],
     ['!rewrite', handleRewrite],
     ['!polish', handlePolish],
+    ['!formal', handleFormal],
+    ['!casual', handleCasual],
     ['!translate', handleTranslate],
     ['!shorten', handleShorten],
+    ['!short', handleShorten],
+    ['!bullets', handleBullets],
+    ['!bullet', handleBullets],
     ['!mute', handleMute],
     ['!unmute', handleUnmute],
+    ['!mode', handleMode],
     ['!groupmode', handleGroupMode],
     ['!storegroups', handleStoreGroups],
     ['!storegroup', handleStoreGroups],
@@ -96,19 +122,27 @@ function handleMenu() {
         'Voice notes — transcribe and reply automatically',
         '`!summary` / `!recap` — summarize recent chat',
         '`!catchup` — show what needs attention',
+        '`!about <topic>` — search recent chat history',
         '`!todo` / `!task` — extract tasks from recent chat',
         '`!decisions` / `!decision` — extract decisions/open questions',
         '',
         '*Text Tools*',
         '`!ask <question>` — quick answer',
-        '`!remember <fact>` — save private memory',
-        '`!recall <query>` — search private memory',
+        '`!brain` — clean and save a brain dump',
+        '`!remember` / `!save` — save private memory',
+        '`!recall` / `!find` — search private memory',
+        '`!draft` — draft a reply to quoted text',
+        '`!explain` — explain quoted or pasted text',
+        '`!post` / `!thread` / `!caption` / `!script` — content tools',
         '`!rewrite <text>` — rewrite text',
         '`!polish <text>` — clean up text',
+        '`!formal` / `!casual` — change tone',
         '`!translate <lang> <text>` — translate text',
-        '`!shorten <text>` — make text shorter',
+        '`!shorten` / `!short` — make text shorter',
+        '`!bullets` — turn text into bullets',
         '',
         '*Control*',
+        '`!mode auto|personal|business|assistant|draft-only|silent`',
         '`!mute` / `!unmute` — silence or allow this chat',
         '`!groupmode on|off` — toggle group features (admin only)',
         '`!storegroups on|off` — store group messages for summaries (admin only)',
@@ -182,6 +216,14 @@ async function handleCatchup({ text, jid, isAdmin, isGroup }) {
     return runThreadTool({ jid, text, tool: 'catchup', isGroup });
 }
 
+async function handleAbout({ text, jid, isAdmin, isGroup }) {
+    if (!isAdmin) return '❌ Only the admin can search chat history.';
+    if (isGroup && db.getSetting('store_group_messages') !== 'true') {
+        return 'Group message storage is off. Send `!storegroups on`, let the group chat for a bit, then use `!about payment`.';
+    }
+    return runThreadTool({ jid, text, tool: 'query', isGroup });
+}
+
 async function handleTodo({ text, jid, isAdmin, isGroup }) {
     if (!isAdmin) return '❌ Only the admin can extract tasks.';
     if (isGroup && db.getSetting('store_group_messages') !== 'true') {
@@ -238,7 +280,7 @@ function stripCommandText(text, quotedText = '') {
 function handleRemember({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can save private memory.';
     const fact = stripCommandText(text, quotedText);
-    if (!fact) return 'Usage: `!remember the thing you want me to keep`';
+    if (!fact) return 'Usage: `!remember the thing you want me to keep` or reply `!remember` to a message';
     db.saveFact({
         jid: 'private-brain',
         contactName: 'Private Brain',
@@ -268,6 +310,131 @@ function textWithQuotedFallback(text, quotedText) {
     return `${command} ${quotedText}`;
 }
 
+async function handleExplain({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'explain' }) || 'Usage: `!explain your text` or reply `!explain` to a message';
+}
+
+async function handleBrain({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can save brain dumps.';
+    const payload = textWithQuotedFallback(text, quotedText);
+    const result = await runTextTool({ jid, text: payload, tool: 'brain' });
+    if (!result) return 'Usage: `!brain your rough idea` or reply `!brain` to a message';
+    if (!result.startsWith('No LLM key') && !result.startsWith('I tried to run')) {
+        db.saveFact({
+            jid: 'private-brain',
+            contactName: 'Private Brain',
+            fact: result,
+            sourceMsg: stripCommandText(payload),
+        });
+    }
+    return result;
+}
+
+async function handleDraft({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'draft' }) || 'Usage: reply `!draft` to a message or type `!draft what they said`';
+}
+
+async function handlePost({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use content tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'post' }) || 'Usage: `!post your idea` or reply `!post` to a message';
+}
+
+async function handleThread({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use content tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'thread' }) || 'Usage: `!thread your idea` or reply `!thread` to a message';
+}
+
+async function handleCaption({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use content tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'caption' }) || 'Usage: `!caption your idea` or reply `!caption` to a message';
+}
+
+async function handleScript({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use content tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'script' }) || 'Usage: `!script your idea` or reply `!script` to a message';
+}
+
+function settingLines(key) {
+    return String(db.getSetting(key) || '')
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+}
+
+function handlePortfolio() {
+    const identity = db.getIdentity();
+    const links = settingLines('portfolio_links');
+    const projects = identity.projects || db.getSetting('portfolio_projects') || 'Projects are being updated.';
+    return [
+        '*Portfolio*',
+        identity.full_name || identity.nickname || 'EPLY owner',
+        '',
+        projects,
+        links.length ? `\n${links.join('\n')}` : '',
+    ].filter(Boolean).join('\n');
+}
+
+function handleStack() {
+    const identity = db.getIdentity();
+    return [
+        '*Stack*',
+        db.getSetting('portfolio_stack') || identity.what_i_do || 'Full-stack/product engineering, AI tooling, dashboards, and automation.',
+    ].join('\n');
+}
+
+function handleProjects() {
+    const identity = db.getIdentity();
+    return [
+        '*Projects*',
+        identity.projects || db.getSetting('portfolio_projects') || 'Project list is being updated.',
+    ].join('\n');
+}
+
+function handleHireMe() {
+    const identity = db.getIdentity();
+    return [
+        '*Work With Me*',
+        db.getSetting('hire_me_text') || `Send a short brief, budget, timeline, and what you want built. ${identity.nickname || identity.full_name || 'I'} will review and respond.`,
+    ].join('\n');
+}
+
+function getFaqEntries() {
+    try {
+        return JSON.parse(db.getSetting('faq_entries') || '[]');
+    } catch {
+        return [];
+    }
+}
+
+function handleFaq({ text, isAdmin }) {
+    const body = stripCommandText(text);
+    const entries = getFaqEntries();
+
+    if (!body || body === 'list') {
+        if (!entries.length) return 'No FAQs saved yet. Admin: `!faq add question | answer`';
+        return ['*FAQ*', ...entries.map((entry, index) => `${index + 1}. ${entry.q}`)].join('\n');
+    }
+
+    if (body.toLowerCase().startsWith('add ')) {
+        if (!isAdmin) return '❌ Only the admin can add FAQs.';
+        const [q, ...answerParts] = body.slice(4).split('|');
+        const answer = answerParts.join('|').trim();
+        if (!q?.trim() || !answer) return 'Usage: `!faq add question | answer`';
+        entries.push({ q: q.trim(), a: answer });
+        db.setSetting('faq_entries', JSON.stringify(entries.slice(-60)));
+        return 'FAQ saved.';
+    }
+
+    const query = body.toLowerCase();
+    const match = entries.find((entry) => {
+        const q = String(entry.q || '').toLowerCase();
+        return q.includes(query) || query.includes(q);
+    });
+    return match ? match.a : 'No matching FAQ found.';
+}
+
 async function handleRewrite({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
     return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'rewrite' }) || 'Usage: `!rewrite your text` or reply `!rewrite` to a message';
@@ -276,6 +443,16 @@ async function handleRewrite({ text, jid, isAdmin, quotedText }) {
 async function handlePolish({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can use utility tools.';
     return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'polish' }) || 'Usage: `!polish your text` or reply `!polish` to a message';
+}
+
+async function handleFormal({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'formal' }) || 'Usage: `!formal your text` or reply `!formal` to a message';
+}
+
+async function handleCasual({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'casual' }) || 'Usage: `!casual your text` or reply `!casual` to a message';
 }
 
 async function handleTranslate({ text, jid, isAdmin, quotedText }) {
@@ -288,6 +465,11 @@ async function handleShorten({ text, jid, isAdmin, quotedText }) {
     return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'short' }) || 'Usage: `!shorten your text` or reply `!shorten` to a message';
 }
 
+async function handleBullets({ text, jid, isAdmin, quotedText }) {
+    if (!isAdmin) return '❌ Only the admin can use utility tools.';
+    return await runTextTool({ jid, text: textWithQuotedFallback(text, quotedText), tool: 'bullets' }) || 'Usage: `!bullets your text` or reply `!bullets` to a message';
+}
+
 function handleMute({ jid, isAdmin }) {
     if (!isAdmin) return '❌ Only the admin can mute chats.';
     db.saveContactProfile({ jid, muted: 1 });
@@ -298,6 +480,24 @@ function handleUnmute({ jid, isAdmin }) {
     if (!isAdmin) return '❌ Only the admin can unmute chats.';
     db.saveContactProfile({ jid, muted: 0 });
     return '🔔 This chat is unmuted.';
+}
+
+function handleMode({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can change chat mode.';
+    const mode = String(text || '').trim().toLowerCase().split(/\s+/)[1];
+    const allowed = ['auto', 'personal', 'business', 'assistant', 'draft-only', 'silent'];
+    if (!allowed.includes(mode)) {
+        return 'Usage: `!mode auto|personal|business|assistant|draft-only|silent`';
+    }
+
+    db.saveContactProfile({
+        jid,
+        chatMode: mode,
+        muted: mode === 'silent' ? 1 : 0,
+        tonePreference: mode === 'business' ? 'professional' : undefined,
+    });
+
+    return `Chat mode set to ${mode}.`;
 }
 
 module.exports = { isCommand, runCommand };

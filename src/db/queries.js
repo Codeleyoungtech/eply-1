@@ -209,12 +209,13 @@ function getContactProfile(jid) {
     return getDb().prepare('SELECT * FROM contact_profiles WHERE jid = ?').get(jid) || null;
 }
 
-function saveContactProfile({ jid, displayName, tonePreference, respectfulTitles, wittyAllowed, muted }) {
+function saveContactProfile({ jid, displayName, chatMode, tonePreference, respectfulTitles, wittyAllowed, muted }) {
     if (!jid) return null;
 
     const existing = getContactProfile(jid) || {};
     const payload = {
         displayName: displayName !== undefined ? displayName : existing.display_name || null,
+        chatMode: chatMode !== undefined ? chatMode : existing.chat_mode || 'auto',
         tonePreference: tonePreference !== undefined ? tonePreference : existing.tone_preference || 'auto',
         respectfulTitles: respectfulTitles !== undefined ? respectfulTitles : (existing.respectful_titles ?? 1),
         wittyAllowed: wittyAllowed !== undefined ? wittyAllowed : (existing.witty_allowed ?? 0),
@@ -222,10 +223,11 @@ function saveContactProfile({ jid, displayName, tonePreference, respectfulTitles
     };
 
     return getDb()
-        .prepare(`INSERT INTO contact_profiles (jid, display_name, tone_preference, respectful_titles, witty_allowed, muted, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
+        .prepare(`INSERT INTO contact_profiles (jid, display_name, chat_mode, tone_preference, respectful_titles, witty_allowed, muted, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(jid) DO UPDATE SET
                 display_name = excluded.display_name,
+                chat_mode = excluded.chat_mode,
                 tone_preference = excluded.tone_preference,
                 respectful_titles = excluded.respectful_titles,
                 witty_allowed = excluded.witty_allowed,
@@ -234,6 +236,7 @@ function saveContactProfile({ jid, displayName, tonePreference, respectfulTitles
         .run(
             jid,
             payload.displayName,
+            payload.chatMode,
             payload.tonePreference,
             payload.respectfulTitles ? 1 : 0,
             payload.wittyAllowed ? 1 : 0,

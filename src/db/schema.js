@@ -115,6 +115,7 @@ function initDb() {
     CREATE TABLE IF NOT EXISTS contact_profiles (
       jid               TEXT PRIMARY KEY,
       display_name      TEXT,
+      chat_mode         TEXT DEFAULT 'auto',
       tone_preference   TEXT DEFAULT 'auto',
       respectful_titles INTEGER DEFAULT 1,
       witty_allowed     INTEGER DEFAULT 0,
@@ -172,6 +173,18 @@ function initDb() {
       ('group_summary_default_limit', '40'),
       ('reply_style_guard',  'true');
   `);
+
+    for (const statement of [
+        "ALTER TABLE contact_profiles ADD COLUMN chat_mode TEXT DEFAULT 'auto'",
+    ]) {
+        try {
+            db.exec(statement);
+        } catch (err) {
+            if (!String(err.message || '').includes('duplicate column name')) {
+                throw err;
+            }
+        }
+    }
 
     logger.info('Database initialised', { path: dbPath });
     return db;
