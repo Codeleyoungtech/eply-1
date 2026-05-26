@@ -7,10 +7,11 @@
 
 const { getIdentity, getAllSettings, recordLlmUsage } = require('../db/queries');
 const { callGroq } = require('../llm/groq');
-const { callGemini } = require('../llm/gemini');
+const { callGemini, generateEmbedding } = require('../llm/gemini');
 const { callClaude } = require('../llm/claude');
 const { buildPrompt } = require('./promptBuilder');
 const { classify } = require('./toneClassifier');
+const { getContactMemories } = require('./memoryManager');
 const { logger } = require('../logger');
 
 const providerCooldowns = new Map();
@@ -108,6 +109,10 @@ function estimateTokens(text = '') {
 
 function sanitizeReply(reply, { toneCtx, contactProfile, settings }) {
     let output = String(reply || '').replace(/\r/g, '').trim();
+    
+    // Check for [SILENCE] signal
+    if (output.toUpperCase().includes('[SILENCE]')) return null;
+
     output = output.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n');
     output = output.replace(/([!?.,]){3,}/g, '$1$1');
 
@@ -162,6 +167,21 @@ async function routeAndReply(ctx) {
         }
     }
 
+    // ── Semantic Memory Retrieval ──────────────────────────────────────────
+    let memories = [];
+    try {
+        if (process.env.GEMINI_API_KEY && ctx.incomingText) {
+            const queryVector = await generateEmbedding(ctx.incomingText);
+            memories = await getContactMemories(ctx.jid, queryVector);
+            logger.debug('Semantic memories retrieved', { count: memories.length });
+        } else {
+            memories = await getContactMemories(ctx.jid);
+        }
+    } catch (err) {
+        logger.warn('Semantic retrieval failed, falling back to basic', { err: err.message });
+        memories = await getContactMemories(ctx.jid);
+    }
+
     logger.debug('Routing to LLM', { model: selectedModel, jid: ctx.jid, toneCtx });
 
     const candidates = getFallbackOrder(selectedModel).filter((model, index, all) => {
@@ -180,7 +200,7 @@ async function routeAndReply(ctx) {
             incomingText: ctx.incomingText,
             history: ctx.history,
             historySummary: ctx.historySummary,
-            memories: ctx.memories,
+            memories,
             toneCtx,
             model,
             contactProfile: ctx.contactProfile,
@@ -189,11 +209,22 @@ async function routeAndReply(ctx) {
 
         try {
             const rawReply = await callProvider(model, systemPrompt, messages, ctx);
-            const reply = sanitizeReply(rawReply, {
+            let reply = sanitizeReply(rawReply, {
                 toneCtx,
                 contactProfile: ctx.contactProfile,
                 settings,
             });
+
+            if (reply === null) {
+                logger.info('LLM requested silence [SILENCE]', { jid: ctx.jid });
+                return { reply: null, llm: model };
+            }
+
+            // ── Identification Label (Signature) ──────────────────────────
+            const signature = settings.reply_signature || process.env.REPLY_SIGNATURE;
+            if (signature && reply && !reply.includes(signature)) {
+                reply = `${reply}\n\n${signature}`;
+            }
 
             recordLlmUsage({
                 jid: ctx.jid,

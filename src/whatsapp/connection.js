@@ -160,15 +160,22 @@ async function connectToWhatsApp() {
  * Send a text message via the active WhatsApp socket.
  * Tracks the sent message ID to prevent the bot from replying to itself.
  */
-async function sendMessage(jid, text, opts = {}) {
+async function sendMessage(jid, content, opts = {}) {
     if (!sock) throw new Error('WhatsApp not connected');
-    const result = await sock.sendMessage(jid, { text }, opts.quoted ? { quoted: opts.quoted } : undefined);
+    const messageBody = typeof content === 'string' ? { text: content } : content;
+    const result = await sock.sendMessage(jid, messageBody, opts.quoted ? { quoted: opts.quoted } : undefined);
     const msgId = result?.key?.id;
     if (msgId) {
         sentMessageIds.add(msgId);
         setTimeout(() => sentMessageIds.delete(msgId), 30_000); // auto-clean after 30s
     }
-    logger.debug('Message sent', { jid, msgId, preview: text.slice(0, 60) });
+    const preview = typeof content === 'string' ? content.slice(0, 60) : `[${Object.keys(content)[0]}]`;
+    logger.debug('Message sent', { jid, msgId, preview });
 }
 
-module.exports = { connectToWhatsApp, getClient, getQrDataUrl, getStatus, sendMessage, waEmitter };
+async function sendPresence(jid, type) {
+    if (!sock) return;
+    await sock.sendPresenceUpdate(type, jid);
+}
+
+module.exports = { connectToWhatsApp, getClient, getQrDataUrl, getStatus, sendMessage, sendPresence, waEmitter };

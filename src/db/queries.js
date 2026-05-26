@@ -177,10 +177,10 @@ function markDigestDelivered(id) {
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
-function saveFact({ jid, contactName, fact, sourceMsg }) {
+function saveFact({ jid, contactName, fact, sourceMsg, embedding }) {
     return getDb()
-        .prepare('INSERT INTO memory (jid, contact_name, fact, source_msg) VALUES (?, ?, ?, ?)')
-        .run(jid, contactName || null, fact, sourceMsg || null);
+        .prepare('INSERT INTO memory (jid, contact_name, fact, source_msg, embedding) VALUES (?, ?, ?, ?, ?)')
+        .run(jid, contactName || null, fact, sourceMsg || null, embedding ? JSON.stringify(embedding) : null);
 }
 
 function getMemories(jid) {
@@ -191,6 +191,40 @@ function getMemories(jid) {
 
 function getAllMemories() {
     return getDb().prepare('SELECT * FROM memory ORDER BY created_at DESC').all();
+}
+
+function cosineSimilarity(vecA, vecB) {
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < vecA.length; i += 1) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function searchSemanticMemories(queryVector, limit = 8, jid = null) {
+    const query = jid 
+        ? 'SELECT * FROM memory WHERE jid = ? AND embedding IS NOT NULL'
+        : 'SELECT * FROM memory WHERE embedding IS NOT NULL';
+    const params = jid ? [jid] : [];
+    
+    const rows = getDb().prepare(query).all(...params);
+    
+    return rows
+        .map(row => {
+            try {
+                const vec = JSON.parse(row.embedding);
+                return { ...row, score: cosineSimilarity(queryVector, vec) };
+            } catch {
+                return { ...row, score: 0 };
+            }
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .filter(row => row.score > 0.65); // Threshold for relevance
 }
 
 function searchMemories(query, limit = 8) {
@@ -277,10 +311,14 @@ function getJobs() {
     return getDb().prepare('SELECT * FROM scheduler_jobs ORDER BY created_at DESC').all();
 }
 
-function createJob({ name, cronExpr, payload }) {
+function getActiveJobs() {
+    return getDb().prepare('SELECT * FROM scheduler_jobs WHERE enabled = 1').all();
+}
+
+function createSchedulerJob({ name, cronExpr, payload }) {
     return getDb()
         .prepare('INSERT INTO scheduler_jobs (name, cron_expr, payload) VALUES (?, ?, ?)')
-        .run(name, cronExpr || null, payload ? JSON.stringify(payload) : null);
+        .run(name, cronExpr || null, typeof payload === 'string' ? payload : JSON.stringify(payload || {}));
 }
 
 function deleteJob(id) {
@@ -324,9 +362,9 @@ module.exports = {
     recordLlmUsage, getTodayLlmUsage,
     flagMessage, getFlagged, getFlaggedById, markHandled, updateFlaggedReply,
     saveDigest, getDigests, markDigestDelivered,
-    saveFact, getMemories, getAllMemories, searchMemories, deleteFact, updateFact,
+    saveFact, getMemories, getAllMemories, searchMemories, searchSemanticMemories, deleteFact, updateFact,
     getContactProfile, saveContactProfile,
     getSetting, setSetting, getAllSettings,
-    getJobs, createJob, deleteJob, touchJob,
+    getJobs, getActiveJobs, createSchedulerJob, deleteJob, touchJob,
     createReminder, getDueReminders, markReminderDelivered, getUpcomingReminders,
 };

@@ -95,4 +95,11 @@ async function transcribeGeminiAudio(audioBuffer, { mimeType = 'audio/ogg' } = {
     return text;
 }
 
-module.exports = { callGemini, transcribeGeminiAudio };
+async function generateEmbedding(text) {
+    const genAIClient = getGenAI();
+    const model = genAIClient.getGenerativeModel({ model: 'text-embedding-004' });
+    const result = await model.embedContent(text);
+    return result.embedding.values;
+}
+
+module.exports = { callGemini, transcribeGeminiAudio, generateEmbedding };

@@ -8,9 +8,69 @@
 
 const cron = require('node-cron');
 const { buildAndSendDigest } = require('../engine/digestBuilder');
-const { getDueReminders, getSetting, markReminderDelivered } = require('../db/queries');
+const { getDueReminders, getSetting, markReminderDelivered, getActiveJobs, touchJob } = require('../db/queries');
 const { sendMessage } = require('../whatsapp/connection');
 const { logger } = require('../logger');
+
+const activeUserJobs = new Map();
+
+function startUserJobWorker() {
+    // Initial load
+    refreshUserJobs();
+    
+    // Check for changes every minute
+    setInterval(() => {
+        refreshUserJobs();
+    }, 60_000);
+
+    logger.info('User job worker started');
+}
+
+async function refreshUserJobs() {
+    try {
+        const jobs = getActiveJobs();
+        const currentIds = new Set(jobs.map(j => j.id));
+
+        // Remove deleted or disabled jobs
+        for (const [id, task] of activeUserJobs.entries()) {
+            if (!currentIds.has(id)) {
+                task.stop();
+                activeUserJobs.delete(id);
+                logger.debug('Stopped scheduled job', { id });
+            }
+        }
+
+        // Add new jobs
+        for (const job of jobs) {
+            if (!activeUserJobs.has(job.id)) {
+                if (!job.cron_expr) continue;
+                
+                const task = cron.schedule(job.cron_expr, async () => {
+                    logger.info('Running user scheduled job', { name: job.name, id: job.id });
+                    try {
+                        const adminNumber = process.env.ADMIN_NUMBER;
+                        if (!adminNumber) {
+                            logger.warn('No ADMIN_NUMBER set — cannot deliver user job');
+                            return;
+                        }
+                        const jid = `${adminNumber}@s.whatsapp.net`;
+                        const payload = job.payload;
+                        
+                        await sendMessage(jid, `📅 *Scheduled Task: ${job.name}*\n\n${payload}`);
+                        touchJob(job.id);
+                    } catch (err) {
+                        logger.error('Scheduled job execution failed', { id: job.id, err: err.message });
+                    }
+                });
+                
+                activeUserJobs.set(job.id, task);
+                logger.info('Scheduled new user job', { name: job.name, cron: job.cron_expr });
+            }
+        }
+    } catch (err) {
+        logger.error('Failed to refresh user jobs', { err: err.message });
+    }
+}
 
 function startDigestCron() {
     const digestTime = process.env.DIGEST_TIME || getSetting('digest_time') || '07:00';
@@ -71,4 +131,4 @@ function startRetryWorker() {
     }
 }
 
-module.exports = { startDigestCron, startRetryWorker, startReminderWorker };
+module.exports = { startDigestCron, startRetryWorker, startReminderWorker, startUserJobWorker };
