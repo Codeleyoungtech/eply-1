@@ -22,6 +22,9 @@ const { logger } = require('../logger');
 const db = require('../db/queries');
 const { runTextTool, runThreadTool } = require('./groupTools');
 const { parseDueAt, stripReminderCommand } = require('./timeParser');
+const { downloadVideo } = require('./videoTools');
+const { generateEmbedding } = require('../llm/gemini');
+const { exec } = require('child_process');
 
 const COMMANDS = new Map([
     ['!ping',   handlePing],
@@ -90,7 +93,38 @@ const COMMANDS = new Map([
     ['!groupmode', handleGroupMode],
     ['!storegroups', handleStoreGroups],
     ['!storegroup', handleStoreGroups],
+    ['!video', handleVideo],
+    ['!yt', handleVideo],
+    ['!tiktok', handleVideo],
+    ['!ig', handleVideo],
+    ['!fb', handleVideo],
+    ['!twitter', handleVideo],
+    ['!x', handleVideo],
+    ['!song', handleSong],
+    ['!shell', handleShell],
+    ['!cmd', handleShell],
+    ['!cron', handleCron],
+    ['!groupinfo', handleGroupInfo],
 ]);
+
+function handleGroupInfo({ jid, isGroup }) {
+    if (!isGroup) return 'This command only works in groups.';
+    const features = db.getSetting('group_features_enabled') !== 'false';
+    const store = db.getSetting('store_group_messages') === 'true';
+    const mentions = db.getSetting('group_mention_replies') !== 'false';
+    const replies = db.getSetting('group_reply_to_me_replies') !== 'false';
+
+    return [
+        '📋 *Group AI Settings*',
+        '',
+        `AI Features: ${features ? '🟢 ON' : '🔴 OFF'}`,
+        `Message Storage: ${store ? '🟢 ON' : '🔴 OFF'}`,
+        `Mention Triggers: ${mentions ? '✅' : '❌'}`,
+        `Reply-to-Me Triggers: ${replies ? '✅' : '❌'}`,
+        '',
+        '_Use `!groupmode on|off` and `!storegroups on|off` to change._'
+    ].join('\n');
+}
 
 function isCommand(text) {
     if (!text) return false;
@@ -183,9 +217,16 @@ function handleMenu() {
         '',
         '━━ *8. Group Control* ━━',
         '`!groupmode on|off` — group AI features',
-        '`!storegroups on|off` — store group history for summaries',
+        '`!storegroups on|off` — store group history',
+        '`!groupinfo` — show current group settings',
         '',
-        '━━ *9. Group Trigger* ━━',
+        '━━ *9. Media & Advanced* ━━',
+        '`!video <url>` — download video (YT, TikTok, X, FB, IG)',
+        '`!song <url>` — download audio',
+        '`!shell <cmd>` — run terminal command (admin only)',
+        '`!cron "schedule" <msg>` — schedule a message',
+        '',
+        '━━ *10. Group Trigger* ━━',
         'Tag your number or type `@eply` in a group.',
         'Swipe-reply works too: reply with `!draft`, `!explain`, `!remember`, etc.',
         '',
@@ -322,24 +363,48 @@ function stripCommandText(text, quotedText = '') {
     return direct || String(quotedText || '').trim();
 }
 
-function handleRemember({ text, jid, isAdmin, quotedText }) {
+async function handleRemember({ text, jid, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can save private memory.';
     const fact = stripCommandText(text, quotedText);
     if (!fact) return 'Usage: `!remember the thing you want me to keep` or reply `!remember` to a message';
+    
+    let embedding = null;
+    try {
+        if (process.env.GEMINI_API_KEY) {
+            embedding = await generateEmbedding(fact);
+        }
+    } catch (err) {
+        logger.warn('Failed to generate embedding for !remember', { err: err.message });
+    }
+
     db.saveFact({
         jid: 'private-brain',
         contactName: 'Private Brain',
         fact,
         sourceMsg: `Saved from ${jid}`,
+        embedding
     });
     return 'Saved to private memory.';
 }
 
-function handleRecall({ text, isAdmin, quotedText }) {
+async function handleRecall({ text, isAdmin, quotedText }) {
     if (!isAdmin) return '❌ Only the admin can search private memory.';
     const query = stripCommandText(text, quotedText);
     if (!query) return 'Usage: `!recall what you want to find`';
-    const rows = db.searchMemories(query, 6);
+
+    let rows = [];
+    try {
+        if (process.env.GEMINI_API_KEY) {
+            const vector = await generateEmbedding(query);
+            rows = db.searchSemanticMemories(vector, 6);
+        } else {
+            rows = db.searchMemories(query, 6);
+        }
+    } catch (err) {
+        logger.warn('Semantic recall failed, falling back to basic', { err: err.message });
+        rows = db.searchMemories(query, 6);
+    }
+
     if (!rows.length) return 'No matching memory found.';
     return [
         '*Memory matches*',
@@ -566,3 +631,86 @@ function handleMode({ text, jid, isAdmin }) {
 }
 
 module.exports = { isCommand, runCommand };
+
+async function handleVideo({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can download videos.';
+    const url = String(text || '').split(/\s+/)[1];
+    if (!url) return 'Usage: `!video <url>`';
+
+    const { sendMessage } = require('../whatsapp/connection');
+    const fs = require('fs');
+
+    await sendMessage(jid, '⏳ Downloading video... please wait.');
+
+    try {
+        const result = await downloadVideo(url);
+        const buffer = fs.readFileSync(result.filePath);
+        
+        await sendMessage(jid, {
+            video: buffer,
+            caption: `✅ Downloaded: ${url}`,
+            mimetype: 'video/mp4'
+        });
+
+        // Cleanup
+        fs.unlinkSync(result.filePath);
+        return null; // Already sent
+    } catch (err) {
+        logger.error('Video download command failed', { err: err.message });
+        return `❌ Error: ${err.message}`;
+    }
+}
+
+async function handleSong({ text, jid, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can download songs.';
+    const url = String(text || '').split(/\s+/)[1];
+    if (!url) return 'Usage: `!song <url>`';
+
+    const { sendMessage } = require('../whatsapp/connection');
+    const fs = require('fs');
+
+    await sendMessage(jid, '⏳ Downloading audio... please wait.');
+
+    try {
+        const result = await downloadVideo(url, { audioOnly: true });
+        const buffer = fs.readFileSync(result.filePath);
+        
+        await sendMessage(jid, {
+            audio: buffer,
+            mimetype: 'audio/mp4',
+            ptt: false
+        });
+
+        // Cleanup
+        fs.unlinkSync(result.filePath);
+        return null;
+    } catch (err) {
+        logger.error('Song download command failed', { err: err.message });
+        return `❌ Error: ${err.message}`;
+    }
+}
+
+async function handleShell({ text, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can execute shell commands.';
+    const cmd = String(text || '').replace(/^!(shell|cmd)\s*/i, '').trim();
+    if (!cmd) return 'Usage: `!shell <command>`';
+
+    return new Promise((resolve) => {
+        exec(cmd, (error, stdout, stderr) => {
+            const output = stdout || stderr || (error ? error.message : 'Command executed with no output.');
+            resolve('💻 *Shell Output*\n\n```\n' + output.slice(0, 1000) + '\n```');
+        });
+    });
+    }
+
+function handleCron({ text, isAdmin }) {
+    if (!isAdmin) return '❌ Only the admin can manage schedules.';
+    const parts = String(text || '').split(/\s+/);
+    if (parts.length < 3) return 'Usage: `!cron "*/30 * * * *" <message>`';
+    
+    const cronExpr = parts[1].replace(/['"]/g, '');
+    const payload = parts.slice(2).join(' ');
+    
+    db.createSchedulerJob({ name: `user_job_${Date.now()}`, cronExpr, payload });
+    return `📅 Scheduled job created: ` + cronExpr + ` for message: "` + payload + `"`;
+}

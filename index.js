@@ -8,7 +8,7 @@ const { initDb } = require('./src/db/schema');
 const { createApp } = require('./src/dashboard/app');
 const { connectToWhatsApp, waEmitter } = require('./src/whatsapp/connection');
 const { handleMessage } = require('./src/whatsapp/messageHandler');
-const { startDigestCron, startRetryWorker, startReminderWorker } = require('./src/queue/workers');
+const { startDigestCron, startRetryWorker, startReminderWorker, startUserJobWorker } = require('./src/queue/workers');
 
 async function boot() {
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -40,7 +40,8 @@ async function boot() {
         startRetryWorker();
         startDigestCron();
         startReminderWorker();
-        logger.info('Queue workers and digest cron started');
+        startUserJobWorker();
+        logger.info('Queue workers, digest cron, and user job worker started');
     } catch (err) {
         logger.warn('Redis not available — digest cron and queue workers disabled', { err: err.message });
         logger.warn('Tip: Add a Redis service on Railway for full functionality');

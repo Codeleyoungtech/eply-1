@@ -107,6 +107,7 @@ function initDb() {
       contact_name TEXT,
       fact        TEXT NOT NULL,
       source_msg  TEXT,
+      embedding   TEXT, -- Stored as a JSON-encoded vector
       created_at  INTEGER DEFAULT (strftime('%s', 'now'))
     );
     CREATE INDEX IF NOT EXISTS idx_memory_jid ON memory (jid);
@@ -182,11 +183,13 @@ function initDb() {
       ('group_reply_to_me_replies', 'true'),
       ('group_summary_enabled', 'true'),
       ('group_summary_default_limit', '40'),
-      ('reply_style_guard',  'true');
+      ('reply_style_guard',  'true'),
+      ('reply_signature',    '🤖');
   `);
 
     for (const statement of [
         "ALTER TABLE contact_profiles ADD COLUMN chat_mode TEXT DEFAULT 'auto'",
+        "ALTER TABLE memory ADD COLUMN embedding TEXT",
     ]) {
         try {
             db.exec(statement);

@@ -1,94 +1,76 @@
 'use strict';
 
 /**
- * Central Message Handler
- * Pipeline order:
- *  1. Built-in commands (!ping, !help, etc.) — always work, no LLM
- *  2. Bot guard (skip own messages, status broadcasts, history)
- *  3. Auto-reply master switch (env + DB setting)
+ * WhatsApp Message Handler
+ * Orchestrates the full pipeline:
+ *  1. Incoming message parsing (Baileys)
+ *  2. Duplicate/History filtering
+ *  3. Context extraction (Identity + History)
  *  4. Reply rules (VIP guard, group silent logic, spam)
- *  5. LLM routing → send reply
+ *  5. LLM routing & generation
+ *  6. Outgoing response delivery
  */
 
-const { jidNormalizedUser, getContentType } = require('baileys');
-const { downloadMediaMessage } = require('baileys');
-const { isCommand, runCommand } = require('../engine/commands');
-const { applyReplyRules } = require('../engine/replyRules');
-const { routeAndReply } = require('../engine/llmRouter');
-const { getConversationContext } = require('../engine/contextManager');
-const { extractAndStore, getContactMemories } = require('../engine/memoryManager');
-const { getAudioMimeType, transcribeVoiceNote } = require('../engine/audioTools');
-const { resetFollowUp } = require('../engine/urgencyDetector');
-const { sendUrgentPing } = require('../engine/notifier');
-const { saveMessage, flagMessage, getSetting, getTodayLlmUsage, getContactProfile } = require('../db/queries');
-const { sendMessage, getClient } = require('./connection');
 const { logger } = require('../logger');
+const { getConversationContext, trimHistoryForLlm, trimMemoriesForLlm, normalizeIncomingText, estimateRequestTokens } = require('../engine/contextManager');
+const { applyReplyRules, getBudgetFallbackReply } = require('../engine/replyRules');
+const { routeAndReply } = require('../engine/llmRouter');
+const { extractAndStore, getContactMemories } = require('../engine/memoryManager');
+const { saveMessage, getContactProfile, getTodayLlmUsage, getSetting, flagMessage, saveContactProfile } = require('../db/queries');
+const { sendUrgentPing } = require('../engine/notifier');
+const { isCommand, runCommand } = require('../engine/commands');
+const { sendMessage, sendPresence } = require('./connection');
 
-// ── Text extraction helpers ────────────────────────────────────────────────────
+const lastAutoReplyAt = new Map();
+const followUpTimers = new Map();
 
-function unwrapMessageContent(content) {
-    let current = content;
-    for (let i = 0; i < 4; i += 1) {
-        if (!current || typeof current !== 'object') break;
-        if (current.ephemeralMessage?.message) {
-            current = current.ephemeralMessage.message;
-            continue;
+/**
+ * Deduplication helper — checks if content has been processed recently.
+ * Prevents loops if two bots talk to each other.
+ */
+const processedRecent = new Map(); // key: contentHash, val: timestamp
+
+function isDuplicate(text) {
+    if (!text) return false;
+    const now = Date.now();
+    const entry = processedRecent.get(text);
+    if (entry && (now - entry < 5000)) return true;
+    processedRecent.set(text, now);
+    // Cleanup old entries every 100 calls
+    if (processedRecent.size > 200) {
+        for (const [k, v] of processedRecent.entries()) {
+            if (now - v > 30000) processedRecent.delete(k);
         }
-        if (current.viewOnceMessage?.message) {
-            current = current.viewOnceMessage.message;
-            continue;
-        }
-        if (current.viewOnceMessageV2?.message) {
-            current = current.viewOnceMessageV2.message;
-            continue;
-        }
-        if (current.documentWithCaptionMessage?.message) {
-            current = current.documentWithCaptionMessage.message;
-            continue;
-        }
-        if (current.editedMessage?.message) {
-            current = current.editedMessage.message;
-            continue;
-        }
-        break;
     }
-    return current;
+    return false;
 }
 
 function extractText(msg) {
-    const content = unwrapMessageContent(msg?.message);
+    const content = msg.message;
+    if (!content) return '';
+    if (content.conversation) return content.conversation;
+    if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
+    if (content.imageMessage?.caption) return content.imageMessage.caption;
+    if (content.videoMessage?.caption) return content.videoMessage.caption;
+    if (content.documentMessage?.caption) return content.documentMessage.caption;
+    return '';
+}
+
+function extractQuotedText(msg) {
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (!quoted) return null;
+    if (quoted.conversation) return quoted.conversation;
+    if (quoted.extendedTextMessage?.text) return quoted.extendedTextMessage.text;
+    return null;
+}
+
+function getContentType(content) {
     if (!content) return null;
-
-    const type = getContentType(content);
-    if (!type) return null;
-
-    const m = content[type];
-    if (typeof m === 'string') return m.trim() || null;
-    if (m?.text) return String(m.text).trim() || null;
-    if (m?.caption) return String(m.caption).trim() || null;
-    if (m?.conversation) return String(m.conversation).trim() || null;
-    if (type === 'buttonsResponseMessage') {
-        return m?.selectedDisplayText || m?.selectedButtonId || null;
-    }
-    if (type === 'listResponseMessage') {
-        return m?.title || m?.singleSelectReply?.selectedRowId || null;
-    }
-
-    return null;
+    return Object.keys(content)[0];
 }
 
-function extractMediaType(msg) {
-    const content = unwrapMessageContent(msg?.message);
-    const type = getContentType(content);
-    if (type === 'imageMessage') return 'image';
-    if (type === 'audioMessage') return 'audio';
-    if (type === 'documentMessage') return 'document';
-    if (type === 'videoMessage') return 'video';
-    return null;
-}
-
-function extractMediaMimeType(msg) {
-    const content = unwrapMessageContent(msg?.message);
+function getMimeType(msg) {
+    const content = msg.message;
     const type = getContentType(content);
     if (!type) return null;
     return content[type]?.mimetype || null;
@@ -98,271 +80,37 @@ function extractName(msg) {
     return msg.pushName || msg.key?.remoteJid?.split('@')[0] || 'Unknown';
 }
 
-function extractSenderJid(msg) {
-    return jidNormalizedUser(
-        msg?.key?.participant ||
-        msg?.participant ||
-        msg?.message?.extendedTextMessage?.contextInfo?.participant ||
-        msg?.key?.remoteJid ||
-        ''
-    );
-}
-
-function extractContextInfo(msg) {
-    const content = unwrapMessageContent(msg?.message);
-    if (!content) return {};
-    const type = getContentType(content);
-    if (!type) return {};
-    return content[type]?.contextInfo || {};
-}
-
-function isMentioned(msg, meJid, adminNumber) {
-    const body = extractText(msg) || '';
-    const normalizedBody = body.toLowerCase();
-    const mentioned = extractContextInfo(msg)?.mentionedJid || [];
-    const bodyDigits = body.replace(/[^0-9]/g, '');
-    const adminDigits = String(adminNumber || '').replace(/[^0-9]/g, '');
-    const meDigits = String(meJid || '').split('@')[0].replace(/[^0-9]/g, '');
-    const botAliases = String(process.env.EPLY_TRIGGER_NAME || 'eply')
-        .split(',')
-        .map((alias) => alias.trim().toLowerCase())
-        .filter(Boolean);
-
-    const mentionedNormalized = mentioned.map((jid) => jidNormalizedUser(jid));
-    const mentionedDigits = mentioned.map((jid) => String(jid || '').split('@')[0].replace(/[^0-9]/g, ''));
-
-    if (meJid && mentionedNormalized.includes(jidNormalizedUser(meJid))) return true;
-
-    const adminJid = `${adminNumber}@s.whatsapp.net`;
-    if (adminNumber && mentionedNormalized.includes(jidNormalizedUser(adminJid))) return true;
-    if (adminDigits && mentionedDigits.some((digits) => digits === adminDigits || digits.endsWith(adminDigits) || adminDigits.endsWith(digits))) return true;
-    if (meDigits && mentionedDigits.some((digits) => digits === meDigits || digits.endsWith(meDigits) || meDigits.endsWith(digits))) return true;
-    if (adminNumber && body.includes(`@${adminNumber}`)) return true;
-    if (adminDigits && bodyDigits.includes(adminDigits)) return true;
-    if (botAliases.some((alias) => normalizedBody.includes(`@${alias}`))) return true;
-
-    if (meJid) {
-        const meNumber = meJid.split('@')[0];
-        if (meNumber && body.includes(`@${meNumber}`)) return true;
-        if (meDigits && bodyDigits.includes(meDigits)) return true;
-    }
-
-    return false;
-}
-
-function isReplyToMe(msg, meJid) {
-    if (!meJid) return false;
-    const contextInfo = extractContextInfo(msg);
-    const quotedId = contextInfo?.stanzaId;
-    const quotedParticipant = contextInfo?.participant;
-    if (!quotedId || !quotedParticipant) return false;
-    return jidNormalizedUser(quotedParticipant) === jidNormalizedUser(meJid);
-}
-
-function extractQuotedText(msg) {
-    const quoted = extractContextInfo(msg)?.quotedMessage;
-    if (!quoted) return null;
-    return extractText({ message: quoted });
-}
-
-function trimHistoryForLlm(history = [], maxMessages = 8, maxCharsPerMessage = 220) {
-    return history.slice(-maxMessages).map((message) => ({
-        ...message,
-        content: (message.content || '').slice(0, maxCharsPerMessage),
-    }));
-}
-
-function trimMemoriesForLlm(memories = [], maxFacts = 6, maxCharsPerFact = 120) {
-    return memories.slice(0, maxFacts).map((memory) => ({
-        ...memory,
-        fact: (memory.fact || '').slice(0, maxCharsPerFact),
-    }));
-}
-
-function isChannelOrBroadcast(jid) {
-    return jid.endsWith('@newsletter') || (jid.endsWith('@broadcast') && jid !== 'status@broadcast');
-}
-
-function normalizeIncomingText(text) {
-    if (!text) return null;
-    return text.replace(/\s+/g, ' ').trim().slice(0, 600);
-}
-
-function estimateTokens(text = '') {
-    return Math.ceil(String(text || '').length / 4);
-}
-
-function estimateRequestTokens({ incomingText, history = [], historySummary = '', memories = [] }) {
-    const historyText = history.map((message) => message.content || '').join(' ');
-    const memoryText = memories.map((memory) => memory.fact || '').join(' ');
-    return estimateTokens(`${incomingText || ''} ${historyText} ${historySummary || ''} ${memoryText}`) + 400;
-}
-
-function getBudgetFallbackReply(isGroup) {
-    if (isGroup) return null;
-    return 'A bit tied up right now. I will get back to you shortly.';
-}
-
-const pendingReplies = new Map();
-const lastAutoReplyAt = new Map();
-
-function getDebounceMs(isGroup) {
-    const raw = isGroup
-        ? (process.env.GROUP_REPLY_DEBOUNCE_MS || process.env.REPLY_DEBOUNCE_MS || '5000')
-        : (process.env.REPLY_DEBOUNCE_MS || '7000');
-    const ms = Number(raw);
-    if (!Number.isFinite(ms) || ms < 0) return 0;
-    return Math.min(ms, 30000);
-}
-
-function buildBatchedText(items) {
-    const texts = items
-        .map((item) => item.text)
-        .filter(Boolean);
-
-    if (texts.length <= 1) return texts[0] || '';
-
-    return texts
-        .map((text, index) => `Message ${index + 1}: ${text}`)
-        .join('\n');
-}
-
-function mergePendingItems(items) {
-    const last = items[items.length - 1];
-    const quotedItem = [...items].reverse().find((item) => item.quotedText);
-    return {
-        ...last,
-        text: buildBatchedText(items),
-        mediaType: last.mediaType || items.find((item) => item.mediaType)?.mediaType || null,
-        quotedText: quotedItem?.quotedText || null,
-        mentionedMe: items.some((item) => item.mentionedMe),
-        replyToMe: items.some((item) => item.replyToMe),
-        batchSize: items.length,
-    };
-}
-
-function getReplyCooldownMs(isGroup) {
-    const raw = isGroup
-        ? (process.env.GROUP_REPLY_COOLDOWN_MS || process.env.REPLY_COOLDOWN_MS || '60000')
-        : (process.env.REPLY_COOLDOWN_MS || '45000');
-    const ms = Number(raw);
-    if (!Number.isFinite(ms) || ms < 0) return 0;
-    return Math.min(ms, 10 * 60_000);
-}
-
-function scheduleReply(prepared) {
-    const delay = getDebounceMs(prepared.isGroup);
-    if (delay === 0) {
-        return processPreparedReply(prepared);
-    }
-
-    const key = `${prepared.jid}:${prepared.senderJid || 'unknown'}`;
-    const existing = pendingReplies.get(key);
-    const items = existing ? [...existing.items, prepared] : [prepared];
-
-    if (existing?.timer) clearTimeout(existing.timer);
-
-    const timer = setTimeout(async () => {
-        try {
-            pendingReplies.delete(key);
-            const merged = mergePendingItems(items);
-            if (merged.batchSize > 1) {
-                logger.info('Debounced rapid messages into one reply', {
-                    jid: merged.jid,
-                    senderJid: merged.senderJid,
-                    count: merged.batchSize,
-                });
-            }
-            await processPreparedReply(merged);
-        } catch (err) {
-            logger.error('Debounced reply failed', { err: err.message, stack: err.stack?.split('\n')[1] });
-        }
-    }, delay);
-
-    pendingReplies.set(key, { timer, items });
-    logger.debug('Reply debounce scheduled', { jid: prepared.jid, delay, count: items.length });
-}
-
-async function sendReplyChunks(jid, text, quotedMsg = null) {
-    const chunks = String(text || '')
-        .split(/\n+/)
-        .map((chunk) => chunk.trim())
-        .filter(Boolean)
-        .slice(0, 6);
-
-    if (!chunks.length) return;
-
-    for (const [index, chunk] of chunks.entries()) {
-        await sendMessage(jid, chunk, index === 0 && quotedMsg ? { quoted: quotedMsg } : {});
-    }
-}
-
 async function downloadMediaBuffer(msg, sock) {
-    return downloadMediaMessage(
-        msg,
-        'buffer',
-        {},
-        {
-            logger,
-            reuploadRequest: sock?.updateMediaMessage?.bind(sock),
-        }
-    );
+    const { downloadMediaMessage } = require('baileys');
+    try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger });
+        return buffer;
+    } catch (err) {
+        logger.error('Media download failed', { err: err.message });
+        return null;
+    }
 }
 
-async function processPreparedReply(prepared) {
-    const {
-        msg, jid, senderJid, senderPhone, text, mediaType, mediaBuffer, quotedText, contactName,
-        adminNumber, isGroup, contactProfile, groupFeaturesEnabled, mentionedMe,
-        replyToMe,
-    } = prepared;
-
-    const autoReplyEnvOn  = process.env.AUTO_REPLY_ENABLED === 'true';
-    const autoReplyDbOn   = getSetting('auto_reply_enabled') === 'true';
-    const autoReplyEnabled = autoReplyEnvOn || autoReplyDbOn;
-
-    if (!autoReplyEnabled) {
-        logger.info('Auto-reply is OFF — message logged but not replied. Send !on to enable.', { jid });
-        return;
-    }
-
+/**
+ * Main worker for processing a single message.
+ * Extracts context, runs reply rules, calls LLM, and sends reply.
+ */
+async function scheduleReply({
+    msg, jid, senderJid, senderPhone, text, mediaType, mediaBuffer, quotedText,
+    contactName, adminNumber, isGroup, contactProfile,
+    groupFeaturesEnabled,
+    mentionedMe,
+    replyToMe,
+}) {
     const rule = applyReplyRules({
-        jid, phone: senderPhone, senderJid, text, isGroup,
-        mentionedMe, replyToMe, adminNumber, autoReplyEnabled: true,
+        jid, text, mediaType, isGroup, contactProfile,
         groupFeaturesEnabled,
-        groupMentionReplies: getSetting('group_mention_replies') !== 'false',
-        groupReplyToMeReplies: getSetting('group_reply_to_me_replies') !== 'false',
+        mentionedMe,
+        replyToMe,
     });
 
-    logger.debug('Rule result', { action: rule.action, reason: rule.reason });
-
-    if (rule.action === 'silent') return;
-
-    const cooldownMs = getReplyCooldownMs(isGroup);
-    const lastReplyAt = lastAutoReplyAt.get(jid) || 0;
-    const bypassCooldown = Boolean(quotedText || mentionedMe || replyToMe || rule.urgency?.urgent);
-    if (!bypassCooldown && cooldownMs && Date.now() - lastReplyAt < cooldownMs) {
-        logger.info('Reply cooldown active — suppressing extra reply', { jid, cooldownMs });
-        return;
-    }
-
-    if (rule.action === 'ping_only') {
-        await sendUrgentPing({ contactName, theirMsg: text, eplyReply: null, reason: rule.reason, isVip: rule.isVip });
-        return;
-    }
-
-    if (rule.action === 'vague_flag') {
-        const vagueReply = 'let me check and get back to you shortly';
-        await sendReplyChunks(jid, vagueReply, msg);
-        saveMessage({ jid, contactName, direction: 'out', content: vagueReply, llmUsed: null, isGroup });
-        flagMessage({ jid, contactName, theirMsg: text, eplyReply: vagueReply, reason: rule.reason });
-        return;
-    }
-
-    const hasAnyKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
-    if (!hasAnyKey) {
-        const noKeyMsg = 'EPLY is not fully configured yet. Add at least one working LLM key.';
-        await sendMessage(jid, noKeyMsg, { quoted: msg });
-        logger.warn('No LLM API keys configured — sent placeholder reply');
+    if (rule.action === 'silent') {
+        logger.debug('Message ignored by rules', { jid, reason: rule.reason });
         return;
     }
 
@@ -372,7 +120,7 @@ async function processPreparedReply(prepared) {
         fetchLimit: 80,
     });
     const history = trimHistoryForLlm(context.recent);
-    const memories = trimMemoriesForLlm(getContactMemories(jid));
+    const memories = trimMemoriesForLlm(await getContactMemories(jid));
     const todayUsage = getTodayLlmUsage() || {};
     const dailyReplyLimit = Number(getSetting('daily_reply_limit') || 80);
     const dailyTokenLimit = Number(getSetting('daily_estimated_token_limit') || 12000);
@@ -405,10 +153,16 @@ async function processPreparedReply(prepared) {
         ? `Replying to this message: "${normalizeIncomingText(quotedText)}"\nTheir new message: ${normalizeIncomingText(text)}`
         : normalizeIncomingText(text);
 
+    // Show typing status while thinking
+    await sendPresence(jid, 'composing');
+
     const { reply, llm } = await routeAndReply({
         jid, contactName, incomingText, mediaType,
         mediaBuffer: mediaBuffer || null, history, historySummary: context.summary, memories, isGroup, contactProfile,
     });
+
+    // Stop typing status
+    await sendPresence(jid, 'paused');
 
     if (!reply) {
         logger.warn('No reply generated — suppressing send', { jid, llm });
@@ -434,6 +188,40 @@ async function processPreparedReply(prepared) {
     logger.info('✅ Reply sent', { jid, llm, preview: reply.slice(0, 80) });
 }
 
+async function sendReplyChunks(jid, reply, quoted) {
+    // Basic chunking if message is very long
+    if (reply.length < 700) {
+        await sendMessage(jid, reply, { quoted });
+    } else {
+        const chunks = reply.match(/[\s\S]{1,700}(?:\n|$)|[\s\S]{1,700}/g) || [reply];
+        for (const chunk of chunks) {
+            await sendMessage(jid, chunk.trim(), { quoted });
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+}
+
+function resetFollowUp(jid) {
+    const existing = followUpTimers.get(jid);
+    if (existing) clearTimeout(existing);
+    followUpTimers.delete(jid);
+}
+
+function isMentioned(msg, myJid, adminNumber) {
+    const text = extractText(msg).toLowerCase();
+    const myNumber = myJid.split('@')[0];
+    const botAliases = ['@eply', 'eply', 'bot', 'assistant'];
+    const mentionedIds = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const isExplicitlyTagged = mentionedIds.includes(myJid) || mentionedIds.includes(`${adminNumber}@s.whatsapp.net`);
+    const containsBotName = botAliases.some(alias => text.includes(alias));
+    return isExplicitlyTagged || containsBotName;
+}
+
+function isReplyToMe(msg, myJid) {
+    const quotedJid = msg.message?.extendedTextMessage?.contextInfo?.participant;
+    return quotedJid === myJid;
+}
+
 // ── Master handler ────────────────────────────────────────────────────────────
 
 async function handleMessage(msg) {
@@ -443,126 +231,80 @@ async function handleMessage(msg) {
 
         const jid = msg.key.remoteJid;
         if (!jid) return;
-        if (jid === 'status@broadcast') return;
-        if (isChannelOrBroadcast(jid) && process.env.ALLOW_CHANNEL_AI !== 'true') {
-            logger.debug('Ignoring channel/broadcast message', { jid });
-            return;
-        }
 
-        // ── Guard: ignore bot's own outgoing messages (not self-chat) ─────────
-        const sock = getClient();
-        const myJid = sock?.user?.id ? jidNormalizedUser(sock.user.id) : null;
-        const isSelfChat = myJid && jidNormalizedUser(jid) === myJid;
-        const allowSelfChat = process.env.ALLOW_SELF_CHAT_AI === 'true';
-
+        // ── Identity info ─────────────────────────────────────────────────────
+        const myJid = require('./connection').getClient()?.user?.id?.split(':')[0] + '@s.whatsapp.net';
+        const adminNumber = process.env.ADMIN_NUMBER;
+        const isFromMe = msg.key.fromMe;
         const isGroup = jid.endsWith('@g.us');
-        const senderJid = extractSenderJid(msg);
-        const senderPhone = senderJid.replace(/[^0-9]/g, '');
-        let text = extractText(msg);
-        const mediaType = extractMediaType(msg);
-        let mediaBuffer = null;
-        const quotedText = extractQuotedText(msg);
         const contactName = extractName(msg);
-        const adminNumber = process.env.ADMIN_NUMBER || '';
-        const isAdmin = msg.key.fromMe || (adminNumber && senderPhone.startsWith(adminNumber));
+        const senderJid = isGroup ? msg.key.participant : jid;
+        const senderPhone = senderJid?.split('@')[0] || '';
+        const isAdmin = senderPhone === adminNumber;
+
+        // ── Parse content ─────────────────────────────────────────────────────
+        const text = extractText(msg);
+        const quotedText = extractQuotedText(msg);
+        const mediaType = getMimeType(msg)?.split('/')[0] || null;
+
+        // ── LOOP GUARD: never reply to yourself ─────────────────────────────
+        if (isFromMe) return;
+
+        // ── Deduplicate ───────────────────────────────────────────────────────
+        if (isDuplicate(text)) return;
+
+        // ── Auto-save contact profile ─────────────────────────────────────────
+        if (!isGroup) {
+            saveContactProfile({ jid, displayName: contactName });
+        }
         const contactProfile = getContactProfile(jid);
+        const groupFeaturesEnabled = getSetting('group_features_enabled') === 'true';
 
-        if (isSelfChat && !allowSelfChat && !(text && isCommand(text))) {
-            logger.debug('Ignoring self-chat AI message', { jid });
-            return;
-        }
-
-        if (!text && !mediaType) {
-            logger.debug('Ignoring non-content message', { jid, isGroup, isSelfChat });
-            return;
-        }
-
-        if (mediaType === 'audio' && !text) {
-            try {
-                const audioBuffer = await downloadMediaBuffer(msg, sock);
-                const mimeType = getAudioMimeType(msg);
-                const { transcript, provider } = await transcribeVoiceNote({ jid, audioBuffer, mimeType });
-                text = transcript;
-                logger.info('Voice note transcribed', {
-                    jid,
-                    provider,
-                    chars: transcript.length,
-                    preview: transcript.slice(0, 100),
-                });
-            } catch (err) {
-                logger.warn('Voice note transcription failed — suppressing reply', { jid, err: err.message });
+        // ── 1. Process Built-in Commands (!ping, !off, !summary, !video etc.) ───
+        if (isCommand(text)) {
+            const commandReply = await runCommand({ text, jid, isAdmin, isGroup, quotedText });
+            if (commandReply) {
+                await sendMessage(jid, commandReply, { quoted: msg });
                 return;
             }
         }
 
+        // ── 2. Handle Media (Images, PDFs) ────────────────────────────────────
+        let mediaBuffer = null;
         if ((mediaType === 'image' || mediaType === 'document') && process.env.ENABLE_MEDIA_UNDERSTANDING !== 'false') {
             try {
+                const sock = require('./connection').getClient();
                 mediaBuffer = await downloadMediaBuffer(msg, sock);
-                const mimeType = extractMediaMimeType(msg) || '';
-                if (!text) {
-                    text = mediaType === 'image'
-                        ? 'Please look at this image and respond naturally.'
-                        : `Please read and respond to this ${mimeType.includes('pdf') ? 'PDF' : 'document'} naturally.`;
-                }
-                logger.info('Media downloaded for understanding', { jid, mediaType, bytes: mediaBuffer.length });
+                logger.info('Media downloaded for analysis', { jid, type: mediaType });
             } catch (err) {
-                logger.warn('Media download failed — suppressing media reply', { jid, mediaType, err: err.message });
-                return;
+                logger.warn('Media download skipped', { err: err.message });
             }
         }
 
-        if (mediaType && !text) {
-            logger.debug('Ignoring media-only message until media ingestion is implemented', { jid, mediaType });
-            return;
-        }
-
-        // ── 1. Built-in commands — ALWAYS work regardless of auto-reply toggle ─
-        if (text && isCommand(text)) {
-            const cmdReply = await runCommand({ text, jid, isAdmin, isGroup, quotedText });
-            if (cmdReply) {
-                await sendMessage(jid, cmdReply);
-                saveMessage({ jid, contactName, direction: 'out', content: cmdReply, llmUsed: 'builtin', isGroup });
-                logger.info('Command handled', { jid, cmd: text.split(' ')[0] });
-                return;
-            }
-        }
-
-        if (contactProfile?.muted || contactProfile?.chat_mode === 'silent') {
-            logger.info('Muted contact/thread — silencing reply', { jid });
-            return;
-        }
-
-        // ── Bot guard: skip own outgoing messages (except self-chat for testing)
-        if (msg.key.fromMe && !allowSelfChat) {
-            // Save to context so LLM knows what we've already said manually
-            if (text) saveMessage({ jid, contactName, direction: 'out', content: text, mediaType, isGroup, llmUsed: 'manual' });
-            return;
-        }
-
-        // ── Log every real message received ───────────────────────────────────
-        logger.info('▶ Message received', {
-            from: contactName,
-            jid,
-            senderJid,
-            isSelfChat,
-            isGroup,
-            preview: (text || `[${mediaType}]` || '(empty)').slice(0, 80),
-        });
-
-        // ── Save incoming message to DB ────────────────────────────────────────
-        const storeGroupMessages = getSetting('store_group_messages') === 'true';
-        const groupFeaturesEnabled = getSetting('group_features_enabled') !== 'false';
+        // ── Store incoming message in DB ──────────────────────────────────────
         if (text || mediaType) {
-            if (!isGroup || storeGroupMessages) {
+            if (isGroup && getSetting('store_group_messages') === 'true') {
+                saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
+            } else if (!isGroup) {
                 saveMessage({ jid, contactName, direction: 'in', content: text, mediaType, isGroup });
             }
         }
 
         // ── Extract memory facts ───────────────────────────────────────────────
-        if (!isGroup && text) extractAndStore(jid, contactName, text);
+        if (!isGroup && text) await extractAndStore(jid, contactName, text);
 
         const mentionedMe = isGroup ? isMentioned(msg, myJid, adminNumber) : false;
         const replyToMe = isGroup ? isReplyToMe(msg, myJid) : false;
+
+        if (isGroup) {
+            logger.debug('Group trigger check', {
+                jid,
+                mentionedMe,
+                replyToMe,
+                groupFeaturesEnabled,
+                text: text?.slice(0, 50)
+            });
+        }
 
         await scheduleReply({
             msg, jid, senderJid, senderPhone, text, mediaType, mediaBuffer, quotedText,

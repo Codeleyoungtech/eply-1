@@ -7,6 +7,7 @@
  */
 
 const { saveFact, getMemories } = require('../db/queries');
+const { generateEmbedding } = require('../llm/gemini');
 const { logger } = require('../logger');
 
 // Simple heuristic fact extractor (no LLM round-trip on every message)
@@ -28,7 +29,7 @@ const FACT_PATTERNS = [
  * Extracts facts from an incoming message and stores them.
  * Called after every incoming DM.
  */
-function extractAndStore(jid, contactName, text) {
+async function extractAndStore(jid, contactName, text) {
     if (!text) return;
     const existingFacts = new Set(
         getMemories(jid).map((memory) => String(memory.fact || '').trim().toLowerCase())
@@ -40,7 +41,17 @@ function extractAndStore(jid, contactName, text) {
             const fact = template(m);
             const normalizedFact = fact.trim().toLowerCase();
             if (existingFacts.has(normalizedFact)) continue;
-            saveFact({ jid, contactName, fact, sourceMsg: text.slice(0, 200) });
+
+            let embedding = null;
+            try {
+                if (process.env.GEMINI_API_KEY) {
+                    embedding = await generateEmbedding(fact);
+                }
+            } catch (err) {
+                logger.warn('Failed to generate embedding for fact', { err: err.message });
+            }
+
+            saveFact({ jid, contactName, fact, sourceMsg: text.slice(0, 200), embedding });
             existingFacts.add(normalizedFact);
             logger.debug('Memory stored', { jid, fact });
         }
@@ -48,10 +59,13 @@ function extractAndStore(jid, contactName, text) {
 }
 
 /**
- * Retrieve all stored facts for a contact.
+ * Retrieve all stored facts for a contact, optionally using semantic search.
  * @returns {Array<{fact: string}>}
  */
-function getContactMemories(jid) {
+async function getContactMemories(jid, queryVector = null) {
+    if (queryVector) {
+        return require('../db/queries').searchSemanticMemories(queryVector, 8, jid);
+    }
     return getMemories(jid);
 }
 
